@@ -1,4 +1,10 @@
 # -*- coding: utf-8 -*-
+
+"""
+Created: 2026-01-17
+Last Edited: 2026-01-25
+Summary: Machine learning pipeline using Random Forest for abuse classification and FastICA for independent component analysis of oral health indicators.
+"""
 """
 abuse_dental_ml.py
 

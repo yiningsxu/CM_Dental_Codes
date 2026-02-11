@@ -1,3 +1,8 @@
+"""
+Created: 2025-11-30
+Last Edited: 2025-11-30
+Summary: Calculates DMFT indices and performs Kruskal-Wallis and Dunn's tests on DFT index across Pre-COVID/COVID/After COVID periods.
+"""
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns

@@ -1,3 +1,8 @@
+"""
+Created: 2026-02-07
+Last Edited: 2026-02-07
+Summary: Calculates ECC and D-ECC proportions among children under 6 by abuse category with Chi-square tests.
+"""
 import pandas as pd
 import numpy as np
 from scipy import stats

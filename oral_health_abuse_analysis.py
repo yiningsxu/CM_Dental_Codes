@@ -1,4 +1,8 @@
 """
+Created: 2025-12-20
+Last Edited: 2026-01-28
+Summary: Main analysis script for table generation (Tables 1-5), descriptive statistics, and multivariate logistic regression of oral health conditions by abuse type.
+
 ================================================================================
 虐待分類と口腔内状況の関連に関する学術論文用解析コード
 Analysis of Oral Health Conditions by Child Abuse Type
