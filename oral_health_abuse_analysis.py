@@ -24,10 +24,13 @@ Analysis of Oral Health Conditions by Child Abuse Type
 # ============================================================================
 # 0. ライブラリのインポートと初期設定
 # ============================================================================
+import os
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+
 from scipy import stats
 from scipy.stats import chi2_contingency, kruskal, mannwhitneyu, spearmanr
 from scipy.special import comb
@@ -47,7 +50,7 @@ timestamp = datetime.now().strftime('%Y%m%d')
 # ============================================================================
 INPUT_DIR = '/Users/ayo/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analysis/data'
 OUTPUT_DIR = f'/Users/ayo/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analysis/result/{timestamp}/'
-import os
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ============================================================================
@@ -176,10 +179,8 @@ def load_and_prepare_data(filepath):
         df['has_caries'] = (df['DMFT_Index'] > 0).astype(int)
     
     if 'Perm_D' in df.columns and 'Baby_d' in df.columns:
-        df['has_untreated_caries'] = ((df['Perm_D'] + df['Baby_d']) > 0).astype(int)
+        df['has_untreated_caries'] = ((df['DMFT_Index'] > (df['Perm_F'] + df['Baby_f']))).astype(int)
     
-
-
     return df
 
 
