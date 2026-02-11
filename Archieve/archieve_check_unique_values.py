@@ -1,4 +1,7 @@
 """
+・アーカイブ入り・
+最新コードにfunction化。
+
 Created: 2025-11-29
 Last Edited: 2026-02-11
 Summary: Loads 'data_OnlyAbuse_N1235.csv', calculates unique value counts for each column (excluding specific ones), and saves the result to 'unique_values_summary.csv'.
