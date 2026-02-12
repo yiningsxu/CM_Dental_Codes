@@ -23,7 +23,7 @@ from Functions import (
     plot_boxplot_with_dunn,
     plot_boxplot_by_dentition_type,
     generate_summary_report,
-    simple_logistic_regression # Assuming this one is also in Functions.py, wait I didn't verify it
+    simple_logistic_regression
 )
 
 timestamp = datetime.now().strftime('%Y%m%d')

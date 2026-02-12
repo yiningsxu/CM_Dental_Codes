@@ -12,8 +12,6 @@ from datetime import datetime
 timestamp = datetime.now().strftime('%Y%m%d')
 OUTPUT_DIR = './'
 
-
-
 """
 Value Counts Summary
 """
