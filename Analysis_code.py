@@ -284,6 +284,10 @@ perm_teeth_cols = [f'U{i}{j}' for i in [1, 2] for j in range(1, 8)] + \
                   [f'L{i}{j}' for i in [3, 4] for j in range(1, 8)]
 baby_teeth_cols = [f'u{i}{j}' for i in [5, 6] for j in range(1, 6)] + \
                   [f'l{i}{j}' for i in [7, 8] for j in range(1, 6)]
+print("Permanent teeth columns:")
+print(perm_teeth_cols)
+print("Baby teeth columns:")
+print(baby_teeth_cols)
 
 # Ensure columns exist
 perm_teeth_cols = [c for c in perm_teeth_cols if c in df.columns]
@@ -292,38 +296,54 @@ baby_teeth_cols = [c for c in baby_teeth_cols if c in df.columns]
 print(f"   Found {len(perm_teeth_cols)} permanent teeth columns and {len(baby_teeth_cols)} baby teeth columns.")
 
 # Calculate Permanent components
-# 2: Decayed, 3: Filled, 4: Missing (Assumed mapping)
-# 0: Sound
-df['Perm_D'] = df[perm_teeth_cols].apply(lambda x: (x == 2).sum(), axis=1)
+# -1: 未萌出、0: 健全、1: 処置歯、2: C0、3: C、4: 喪失歯、5: その他過剰歯等、6: 先天性欠損、7: 歯牙破折、8: 乳歯晩期残存、9: 癒合歯
+df['Perm_D'] = df[perm_teeth_cols].apply(lambda x: (x == 3).sum(), axis=1)
 df['Perm_M'] = df[perm_teeth_cols].apply(lambda x: (x == 4).sum(), axis=1)
-df['Perm_F'] = df[perm_teeth_cols].apply(lambda x: (x == 3).sum(), axis=1)
+df['Perm_F'] = df[perm_teeth_cols].apply(lambda x: (x == 1).sum(), axis=1)
 df['Perm_Sound'] = df[perm_teeth_cols].apply(lambda x: (x == 0).sum(), axis=1)
 df['Perm_DMFT'] = df['Perm_D'] + df['Perm_M'] + df['Perm_F']
 
+df["Perm_C0"] = df[perm_teeth_cols].apply(lambda x: (x == 2).sum(), axis=1)
+df["Perm_DMFT_C0"] = df["Perm_DMFT"] + df["Perm_C0"]
+
 # Calculate Baby components
-df['Baby_d'] = df[baby_teeth_cols].apply(lambda x: (x == 2).sum(), axis=1)
-df['Baby_m'] = df[baby_teeth_cols].apply(lambda x: (x == 4).sum(), axis=1) # Note: Missing baby teeth often not recorded as 4
-df['Baby_f'] = df[baby_teeth_cols].apply(lambda x: (x == 3).sum(), axis=1)
+df['Baby_d'] = df[baby_teeth_cols].apply(lambda x: (x == 3).sum(), axis=1)
+df['Baby_m'] = df[baby_teeth_cols].apply(lambda x: (x == 4).sum(), axis=1)
+df['Baby_f'] = df[baby_teeth_cols].apply(lambda x: (x == 1).sum(), axis=1)
 df['Baby_sound'] = df[baby_teeth_cols].apply(lambda x: (x == 0).sum(), axis=1)
 df['Baby_DMFT'] = df['Baby_d'] + df['Baby_m'] + df['Baby_f']
 
+df["Baby_C0"] = df[baby_teeth_cols].apply(lambda x: (x == 2).sum(), axis=1)
+df["Baby_DMFT_C0"] = df["Baby_DMFT"] + df["Baby_C0"]
+
 # Total DMFT
 df['DMFT_Index'] = df['Perm_DMFT'] + df['Baby_DMFT']
+df['DMFT_Index_C0'] = df['Perm_DMFT_C0'] + df['Baby_DMFT_C0']
 
 # Calculate Care Index (Filled / DMFT * 100)
 # Handle division by zero: if DMFT=0, Care Index is NaN
 df['Care_Index'] = (df['Perm_F'] + df['Baby_f']) / df['DMFT_Index'] * 100
-df['Care_Index'] = df['Care_Index'].replace([np.inf, -np.inf], np.nan)
+df['Care_Index'] = df['Care_Index'].replace([np.inf, -np.inf], np.nan) # むし歯がゼロの人（分母が0）をNaNにする
 
-# Calculate Healthy Rate (Sound / (Sound + DMFT) * 100)
-# Denominator = Sound + D + M + F (Total examined teeth)
-total_teeth = df['Perm_Sound'] + df['Baby_sound'] + df['DMFT_Index']
-df['Healthy_Rate'] = (df['Perm_Sound'] + df['Baby_sound']) / total_teeth * 100
+# Calculate Healthy Rate (Sound / total_teeth * 100)
+df["Perm_total_teeth"] = ((df[perm_teeth_cols].notna()) & (df[perm_teeth_cols] != -1)).sum(axis=1)
+df["Baby_total_teeth"] = ((df[baby_teeth_cols].notna()) & (df[baby_teeth_cols] != -1)).sum(axis=1)
+df['total_teeth'] = df["Perm_total_teeth"] + df["Baby_total_teeth"]
+
+df["Perm_sound_rate"] = df["Perm_Sound"] / df["Perm_total_teeth"] * 100
+df["Perm_sound_rate"] = df["Perm_sound_rate"].replace([np.inf, -np.inf], np.nan)
+df["Baby_sound_rate"] = df["Baby_sound"] / df["Baby_total_teeth"] * 100
+df["Baby_sound_rate"] = df["Baby_sound_rate"].replace([np.inf, -np.inf], np.nan)
+df['Healthy_Rate'] = (df['Perm_Sound'] + df['Baby_sound']) / df['total_teeth'] * 100
 df['Healthy_Rate'] = df['Healthy_Rate'].replace([np.inf, -np.inf], np.nan)
 
 # Add caries indicators
 df['has_caries'] = (df['DMFT_Index'] > 0).astype(int)
+df["has_caries_perm"] = (df["Perm_DMFT"] > 0).astype(int)
+df["has_caries_baby"] = (df["Baby_DMFT"] > 0).astype(int)
 df['has_untreated_caries'] = ((df['Perm_D'] + df['Baby_d']) > 0).astype(int)
+df["has_untreated_caries_perm"] = (df["Perm_D"] > 0).astype(int)
+df["has_untreated_caries_baby"] = (df["Baby_d"] > 0).astype(int)
 
 print(f"   Calculated DMFT_Index. Mean: {df['DMFT_Index'].mean():.2f}")
 print(f"   Calculated Care_Index. Mean: {df['Care_Index'].mean():.2f}")
