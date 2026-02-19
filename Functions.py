@@ -940,7 +940,7 @@ Groups based on present teeth:
 Returns a DataFrame with descriptive statistics for each dentition_type × abuse combination
 """
 def create_table6_dmft_by_dentition_abuse(df):
-    required_cols = ['DMFT_Index', 'Present_Teeth', 'Present_Baby_Teeth', 'Present_Perm_Teeth', 'abuse']
+    required_cols = ['DMFT_Index', 'Present_Teeth', 'Perm_total_teeth', 'Present_Perm_Teeth', 'abuse']
     for col in required_cols:
         if col not in df.columns:
             print(f"   ⚠ '{col}' column not found in data")
@@ -1754,7 +1754,7 @@ Parameters:
 """
 def plot_boxplot_by_dentition_type(df, output_dir=OUTPUT_DIR, p_adjust='bonferroni', palette='Set2'):
     
-    required_cols = ['DMFT_Index', 'Present_Teeth', 'Present_Baby_Teeth', 'Present_Perm_Teeth']
+    required_cols = ['DMFT_Index', 'total_teeth', 'Baby_total_teeth', 'Perm_total_teeth']
     for col in required_cols:
         if col not in df.columns:
             print(f"   ⚠ '{col}' column not found in data")
@@ -1762,9 +1762,9 @@ def plot_boxplot_by_dentition_type(df, output_dir=OUTPUT_DIR, p_adjust='bonferro
     
     # Create dentition type column
     def get_dentition_type(row):
-        present_teeth = row['Present_Teeth'] if pd.notna(row['Present_Teeth']) else 0
-        present_baby = row['Present_Baby_Teeth'] if pd.notna(row['Present_Baby_Teeth']) else 0
-        present_perm = row['Present_Perm_Teeth'] if pd.notna(row['Present_Perm_Teeth']) else 0
+        present_teeth = row['total_teeth'] if pd.notna(row['total_teeth']) else 0
+        present_baby = row['Baby_total_teeth'] if pd.notna(row['Baby_total_teeth']) else 0
+        present_perm = row['Perm_total_teeth'] if pd.notna(row['Perm_total_teeth']) else 0
         
         if present_teeth == 0:
             return 'No_Teeth'
