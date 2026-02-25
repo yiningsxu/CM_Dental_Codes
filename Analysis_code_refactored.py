@@ -53,11 +53,12 @@ def main():
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # assuming code/ is one level deep
     DATA_DIR = os.path.join(BASE_DIR, 'data')
     DATA_DESCRIPTION_OUTPUT_DIR = os.path.join(DATA_DIR, 'data_description')
-    OUTPUT_DIR = os.path.join(BASE_DIR, 'result', timestamp)
+    OUTPUT_DIR = os.path.join(BASE_DIR, 'result', timestamp) + os.sep
 
     # Ensure directories exist
     os.makedirs(DATA_DESCRIPTION_OUTPUT_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    print("OUTPUT_DIR:", OUTPUT_DIR)
 
     ORIGINAL_DATA_NAME = 'analysisData_20260211'
     ORIGINAL_DATA_PATH = os.path.join(DATA_DIR, f'{ORIGINAL_DATA_NAME}.csv')
