@@ -163,6 +163,8 @@ def main():
     baby_cols = [c for c in baby_teeth_cols if c in df.columns]
 
     # Vectorized DMFT Calculation
+    # -1: 未萌出、0: 健全、1: 処置歯、2: C0、3: C、4: 喪失歯、5: その他過剰歯等、6: 先天性欠損、7: 歯牙破折、8: 乳歯晩期残存、9: 癒合歯
+
     # Permanent
     if perm_cols:
         df['Perm_D'] = (df[perm_cols] == 3).sum(axis=1)
