@@ -1044,6 +1044,7 @@ def create_table_dmft_by_year_abuse(df: pd.DataFrame):
     df_local['Dt'] = df_local.get('Perm_D', 0) + df_local.get('Baby_d', 0)
     df_local['Mt'] = df_local.get('Perm_M', 0) + df_local.get('Baby_m', 0)
     df_local['Ft'] = df_local.get('Perm_F', 0) + df_local.get('Baby_f', 0)
+    df_local['DFt'] = df_local['Dt'] + df_local['Ft']
     
     abuse_types = list(df_local['abuse'].cat.categories) if hasattr(df_local['abuse'], 'cat') else sorted(df_local['abuse'].dropna().unique())
     years = sorted(df_local['year'].dropna().unique())
@@ -1052,9 +1053,12 @@ def create_table_dmft_by_year_abuse(df: pd.DataFrame):
     
     vars_to_summarize = [
         ('DMFT_Index', 'DMFT'),
+        ('Perm_DMFT', 'Perm_DMFT'),
+        ('Baby_DMFT', 'Baby_DMFT'),
         ('Dt', 'Dt (Untreated)'),
         ('Mt', 'Mt (Missing)'),
-        ('Ft', 'Ft (Filled)')
+        ('Ft', 'Ft (Filled)'),
+        ('DFt', 'DFt (Dt+Ft)')
     ]
     
     for year in years:
