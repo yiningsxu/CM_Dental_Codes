@@ -215,6 +215,19 @@ def main():
     df['has_caries'] = (df['DMFT_Index'] > 0).astype(int)
     df['has_untreated_caries'] = ((df['Perm_D'] + df['Baby_d']) > 0).astype(int)
 
+    # Dentition Type
+    def get_dentition_type(row):
+        present_teeth = row['total_teeth'] if pd.notna(row['total_teeth']) else 0
+        present_baby = row['Baby_total_teeth'] if pd.notna(row['Baby_total_teeth']) else 0
+        present_perm = row['Perm_total_teeth'] if pd.notna(row['Perm_total_teeth']) else 0
+        
+        if present_teeth == 0: return 'No_Teeth'
+        elif present_baby == present_teeth and present_perm == 0: return 'primary_dentition'
+        elif present_perm == present_teeth and present_baby == 0: return 'permanent_dentition'
+        else: return 'mixed_dentition'
+        
+    df['dentition_type'] = df.apply(get_dentition_type, axis=1)
+
     # Basic stats
     logger.info(f"DMFT Mean: {df['DMFT_Index'].mean():.2f}")
 
@@ -223,9 +236,16 @@ def main():
     # ============================================================================
     logger.info("Runnning statistical analysis...")
     
-    # Table 1
+    # Table 1: Overall Demographics
     table1 = create_table1_demographics(df)
     table1.to_csv(os.path.join(OUTPUT_DIR, f'table1_demographics_{timestamp}.csv'), index=False)
+    
+    # Table 1: Demographics by Dentition Period
+    for dent_type in ['primary_dentition', 'mixed_dentition', 'permanent_dentition']:
+        df_dent = df[df['dentition_type'] == dent_type]
+        if not df_dent.empty:
+            table1_dent = create_table1_demographics(df_dent)
+            table1_dent.to_csv(os.path.join(OUTPUT_DIR, f'table1_demographics_{dent_type}_{timestamp}.csv'), index=False)
     
     # Table 2
     table2_cont, table2_cat = create_table2_oral_health_descriptive(df)

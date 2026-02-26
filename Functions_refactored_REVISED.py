@@ -3,10 +3,17 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import chi2_contingency, kruskal, mannwhitneyu
+from scipy.stats import chi2_contingency, kruskal, mannwhitneyu, norm
 import scikit_posthocs as sp
 from scikit_posthocs import posthoc_dunn
 import statsmodels.api as sm
+
+import warnings
+from statsmodels.tools.sm_exceptions import PerfectSeparationError
+try:
+    import patsy
+except ImportError:  # pragma: no cover
+    patsy = None
 import itertools
 from datetime import datetime
 import os
@@ -151,9 +158,18 @@ def create_table1_demographics(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(results)
 
 def create_table2_oral_health_descriptive(df: pd.DataFrame):
-    """Table 2: Descriptive Statistics for Oral Health"""
+    """Table 2: Descriptive Statistics for Oral Health
+
+    Important:
+      - Care_Index and UTN_Score are undefined when DMFT_Index == 0 (division by zero).
+        To avoid denominator-of-zero artifacts, summaries and Kruskal–Wallis tests for
+        these two variables are computed among children with DMFT_Index > 0 only.
+    """
     abuse_types = df['abuse'].cat.categories
-    
+
+    # Variables that are ratios with DMFT_Index in the denominator
+    ratio_vars = {'Care_Index', 'UTN_Score'}
+
     continuous_vars = [
         ('DMFT_Index', 'DMFT Index (Total)'),
         ('Perm_DMFT', 'Permanent DMFT'),
@@ -166,22 +182,28 @@ def create_table2_oral_health_descriptive(df: pd.DataFrame):
         ('Baby_f', 'Primary f (filled)'),
         ('C0_Count', 'C0 (Incipient Caries)'),
         ('Healthy_Rate', 'Healthy Teeth Rate (%)'),
-        ('Care_Index', 'Care Index (%)'),
-        ('UTN_Score', 'Untreated Caries Rate (%)'),
+        ('Care_Index', 'Care Index (%) (DMFT_Index>0 only)'),
+        ('UTN_Score', 'Untreated Caries Rate (%) (DMFT_Index>0 only)'),
         ('Trauma_Count', 'Dental Trauma Count'),
         ('RDT_Count', 'Retained Deciduous Teeth')
     ]
-    
+
     results_continuous = []
-    
+
+    def _filtered_df_for_var(dfx: pd.DataFrame, var_name: str) -> pd.DataFrame:
+        if var_name in ratio_vars and 'DMFT_Index' in dfx.columns:
+            return dfx[dfx['DMFT_Index'] > 0]
+        return dfx
+
     for var_name, var_label in continuous_vars:
         if var_name not in df.columns:
             continue
-            
+
         row = {'Variable': var_label}
-        
+
         for abuse in abuse_types:
-            subset = df[df['abuse'] == abuse][var_name].dropna()
+            df_sub = _filtered_df_for_var(df[df['abuse'] == abuse], var_name)
+            subset = df_sub[var_name].dropna()
             if len(subset) > 0:
                 mean = subset.mean()
                 std = subset.std()
@@ -192,25 +214,34 @@ def create_table2_oral_health_descriptive(df: pd.DataFrame):
             else:
                 row[f'{abuse}_Mean_SD'] = 'N/A'
                 row[f'{abuse}_Median_IQR'] = 'N/A'
-        
-        total = df[var_name].dropna()
+
+        df_total = _filtered_df_for_var(df, var_name)
+        total = df_total[var_name].dropna()
         if len(total) > 0:
             row['Total_Mean_SD'] = f"{total.mean():.2f} ± {total.std():.2f}"
             row['Total_Median_IQR'] = f"{total.median():.1f} [{total.quantile(0.25):.1f}-{total.quantile(0.75):.1f}]"
-        
-        groups = [df[df['abuse'] == abuse][var_name].dropna() for abuse in abuse_types]
-        groups = [g for g in groups if len(g) > 0]
+        else:
+            row['Total_Mean_SD'] = 'N/A'
+            row['Total_Median_IQR'] = 'N/A'
+
+        groups = []
+        for abuse in abuse_types:
+            df_sub = _filtered_df_for_var(df[df['abuse'] == abuse], var_name)
+            g = df_sub[var_name].dropna()
+            if len(g) > 0:
+                groups.append(g)
+
         if len(groups) >= 2:
             try:
                 _, p_val = kruskal(*groups)
                 row['p-value'] = f"{p_val:.4f}" if p_val >= 0.0001 else "<0.0001"
-            except:
+            except Exception:
                 row['p-value'] = 'N/A'
         else:
             row['p-value'] = 'N/A'
-        
+
         results_continuous.append(row)
-    
+
     categorical_vars = [
         ('gingivitis', 'Gingivitis'),
         ('needTOBEtreated', 'Treatment Need'),
@@ -218,13 +249,13 @@ def create_table2_oral_health_descriptive(df: pd.DataFrame):
         ('OralCleanStatus', 'Oral Hygiene Status'),
         ('habits', 'Oral Habits')
     ]
-    
+
     results_categorical = []
-    
+
     for var_name, var_label in categorical_vars:
         if var_name not in df.columns:
             continue
-        
+
         header_row = {'Variable': var_label, 'Category': ''}
         for abuse in abuse_types:
             header_row[f'{abuse}_n'] = ''
@@ -233,67 +264,79 @@ def create_table2_oral_health_descriptive(df: pd.DataFrame):
         header_row['Total_%'] = ''
         header_row['p-value'] = ''
         results_categorical.append(header_row)
-        
+
         df_valid = df.dropna(subset=[var_name])
         try:
             contingency = pd.crosstab(df_valid['abuse'], df_valid[var_name])
             chi2, p_val, _, _ = chi2_contingency(contingency)
-        except:
+        except Exception:
             p_val = np.nan
-        
+
         categories = df[var_name].cat.categories if hasattr(df[var_name], 'cat') else df[var_name].dropna().unique()
         first_cat = True
-        
+
         for cat in categories:
             row = {'Variable': '', 'Category': f'  {cat}'}
-            
+
             for abuse in abuse_types:
                 n = df[(df['abuse'] == abuse) & (df[var_name] == cat)].shape[0]
                 total_abuse = df[(df['abuse'] == abuse) & (df[var_name].notna())].shape[0]
                 pct = (n / total_abuse * 100) if total_abuse > 0 else 0
                 row[f'{abuse}_n'] = n
                 row[f'{abuse}_%'] = f"{pct:.1f}"
-            
+
             total_n = df[df[var_name] == cat].shape[0]
             total_valid = df[df[var_name].notna()].shape[0]
             total_pct = (total_n / total_valid * 100) if total_valid > 0 else 0
             row['Total_n'] = total_n
             row['Total_%'] = f"{total_pct:.1f}"
-            
+
             if first_cat and not np.isnan(p_val):
                 row['p-value'] = f"{p_val:.4f}" if p_val >= 0.0001 else "<0.0001"
             else:
                 row['p-value'] = ''
             first_cat = False
-            
+
             results_categorical.append(row)
-    
+
     return pd.DataFrame(results_continuous), pd.DataFrame(results_categorical)
 
 def create_table3_statistical_comparisons(df: pd.DataFrame):
-    """Table 3: Statistical Comparisons (Kruskal-Wallis & Post-hoc Dunn's)"""
+    """Table 3: Statistical Comparisons (Kruskal–Wallis & Post-hoc Dunn's)
+
+    Notes:
+      - For ratio outcomes with DMFT_Index as denominator (Care_Index, UTN_Score),
+        we restrict analyses to children with DMFT_Index > 0 to avoid denominator-of-zero artifacts.
+    """
     abuse_types = list(df['abuse'].cat.categories)
-    
+
     continuous_vars = [
-        'DMFT_Index', 'Perm_DMFT', 'Baby_DMFT', 
+        'DMFT_Index', 'Perm_DMFT', 'Baby_DMFT',
         'Perm_D', 'Perm_M', 'Perm_F',
         'Baby_d', 'Baby_m', 'Baby_f',
-        'C0_Count', 'Healthy_Rate', 'Care_Index', 
-        'UTN_Score', 'Trauma_Count',"DMFT_C0","Perm_DMFT_C0","Baby_DMFT_C0"
+        'C0_Count', 'Healthy_Rate', 'Care_Index',
+        'UTN_Score', 'Trauma_Count', 'DMFT_C0', 'Perm_DMFT_C0', 'Baby_DMFT_C0'
     ]
-    
+
+    ratio_vars = {'Care_Index', 'UTN_Score'}
+
+    def _df_for_var(dfx: pd.DataFrame, var: str) -> pd.DataFrame:
+        if var in ratio_vars and 'DMFT_Index' in dfx.columns:
+            return dfx[dfx['DMFT_Index'] > 0]
+        return dfx
+
+    present_vars = [v for v in continuous_vars if v in df.columns]
+
     overall_results = []
-    
-    for var in continuous_vars:
-        if var not in df.columns:
-            continue
-        
-        groups = [df[df['abuse'] == abuse][var].dropna() for abuse in abuse_types]
+
+    for var in present_vars:
+        df_var = _df_for_var(df, var).dropna(subset=[var, 'abuse'])
+        groups = [df_var[df_var['abuse'] == abuse][var].dropna() for abuse in abuse_types]
         groups = [g for g in groups if len(g) > 0]
-        
+
         if len(groups) < 2:
             continue
-        
+
         try:
             h_stat, p_kw = kruskal(*groups)
             overall_results.append({
@@ -311,69 +354,66 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                 'p-value': 'N/A',
                 'Significant': 'N/A'
             })
-    
+
     posthoc_results = []
     tidy_posthoc_pairwise = []
-    
-    for var in continuous_vars:
-        if var not in df.columns:
-            continue
-        
-        kw_p_val_str = next((r['p-value'] for r in overall_results if r['Variable'] == var), None)
+
+    for var in present_vars:
         is_sig = next((r['Significant'] for r in overall_results if r['Variable'] == var), "No")
-        
         if is_sig != 'Yes':
             continue
 
+        df_var = _df_for_var(df, var).dropna(subset=[var, 'abuse'])
+
         try:
-            dunn_adj, dunn_unadj = posthoc_dunn(df, val_col=var, group_col='abuse', p_adjust='bonferroni')
-            
+            dunn_adj, dunn_unadj = posthoc_dunn(df_var, val_col=var, group_col='abuse', p_adjust='bonferroni')
+
             for i, abuse1 in enumerate(abuse_types):
                 for abuse2 in abuse_types[i+1:]:
                     if abuse1 in dunn_adj.index and abuse2 in dunn_adj.columns:
-                        p_adj = dunn_adj.loc[abuse1, abuse2]
-                        p_unadj = dunn_unadj.loc[abuse1, abuse2]
-                        
+                        p_adj = float(dunn_adj.loc[abuse1, abuse2])
+                        p_unadj = float(dunn_unadj.loc[abuse1, abuse2])
+
                         posthoc_results.append({
                             'Variable': var,
                             'Comparison': f"{abuse1} vs {abuse2}",
                             'p-value (adjusted)': f"{p_adj:.4f}" if p_adj >= 0.0001 else "<0.0001",
                             'Significant': 'Yes' if p_adj < 0.05 else 'No'
                         })
-                        
+
                         tidy_posthoc_pairwise.append({
                             'variable': var,
                             'group1': abuse1,
                             'group2': abuse2,
                             'p_unadjusted': p_unadj,
                             'p_adjusted': p_adj,
-                            'significant': p_adj < 0.05
+                            'significant': p_adj < 0.05,
+                            'analysis_type': 'Table 3: Overall'
                         })
         except Exception:
             pass
-    
-    # Pairwise Mann-Whitney (optional, good for sensitivity analysis)
+
+    # Pairwise Mann–Whitney (optional; sensitivity)
     pairwise_results = []
     abuse_pairs = list(itertools.combinations(abuse_types, 2))
-    n_comparisons = len(abuse_pairs) * len(continuous_vars)
+    n_comparisons = len(abuse_pairs) * max(len(present_vars), 1)
     bonferroni_threshold = 0.05 / n_comparisons if n_comparisons > 0 else 0.05
-    
-    for var in continuous_vars:
-        if var not in df.columns:
-            continue
-        
+
+    for var in present_vars:
+        df_var = _df_for_var(df, var)
+
         for abuse1, abuse2 in abuse_pairs:
-            group1 = df[df['abuse'] == abuse1][var].dropna()
-            group2 = df[df['abuse'] == abuse2][var].dropna()
-            
+            group1 = df_var[df_var['abuse'] == abuse1][var].dropna()
+            group2 = df_var[df_var['abuse'] == abuse2][var].dropna()
+
             if len(group1) == 0 or len(group2) == 0:
                 continue
-            
+
             try:
                 u_stat, p_val = mannwhitneyu(group1, group2, alternative='two-sided')
                 n1, n2 = len(group1), len(group2)
                 r = 1 - (2 * u_stat) / (n1 * n2)
-                
+
                 pairwise_results.append({
                     'Variable': var,
                     'Group1': abuse1,
@@ -385,108 +425,310 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                     'Effect_Size_r': f"{r:.3f}",
                     'Significant_Bonferroni': 'Yes' if p_val < bonferroni_threshold else 'No'
                 })
-            except:
+            except Exception:
                 pass
-    
-    for r in tidy_posthoc_pairwise:
-        r['analysis_type'] = 'Table 3: Overall'
-    
+
     return pd.DataFrame(overall_results), pd.DataFrame(posthoc_results), pd.DataFrame(pairwise_results), tidy_posthoc_pairwise
 
-def simple_logistic_regression(X, y):
-    try:
-        model = sm.Logit(y, X)
-        result = model.fit(disp=0)
-        
-        params = result.params
-        conf_int = result.conf_int()
-        p_values = result.pvalues
-        
-        odds_ratios = np.exp(params)
-        ci_lower = np.exp(conf_int[:, 0])
-        ci_upper = np.exp(conf_int[:, 1])
-        
-        return {
-            'odds_ratios': odds_ratios,
-            'ci_lower': ci_lower,
-            'ci_upper': ci_upper,
-            'p_values': p_values
-        }
-    except Exception as e:
-        raise e
+def _firth_logit(X: np.ndarray, y: np.ndarray, maxiter: int = 100, tol: float = 1e-8):
+    """Firth penalized logistic regression (bias-reduced).
 
-def create_table4_multivariate_analysis(df: pd.DataFrame):
-    """Table 4: Age/Sex Adjusted Logistic Regression"""
+    This is primarily used as a fallback when standard MLE logistic regression
+    encounters (quasi-)separation (common with small/imbalanced groups).
+    Returns Wald-type SE from inverse Fisher information.
+    """
+    X = np.asarray(X, dtype=float)
+    y = np.asarray(y, dtype=float).reshape(-1)
+
+    n, p = X.shape
+    beta = np.zeros(p, dtype=float)
+
+    def _sigmoid(z):
+        return 1.0 / (1.0 + np.exp(-z))
+
+    converged = False
+    for _ in range(maxiter):
+        eta = X @ beta
+        mu = _sigmoid(eta)
+
+        W = mu * (1.0 - mu)
+        W = np.clip(W, 1e-9, None)  # avoid zeros
+
+        XtW = X.T * W
+        I = XtW @ X
+
+        try:
+            I_inv = np.linalg.inv(I)
+        except np.linalg.LinAlgError:
+            # add a small ridge if singular
+            I_inv = np.linalg.pinv(I)
+
+        # hat diagonal: h_i = W_i * x_i^T I^{-1} x_i
+        h = (np.sum((X @ I_inv) * X, axis=1) * W)
+
+        # Firth adjustment term
+        a = (0.5 - mu) * h
+
+        # working response
+        z = eta + (y - mu + a) / W
+
+        beta_new = I_inv @ (X.T @ (W * z))
+
+        if np.max(np.abs(beta_new - beta)) < tol:
+            beta = beta_new
+            converged = True
+            break
+        beta = beta_new
+
+    # final covariance
+    eta = X @ beta
+    mu = _sigmoid(eta)
+    W = np.clip(mu * (1.0 - mu), 1e-9, None)
+    XtW = X.T * W
+    I = XtW @ X
+    try:
+        cov = np.linalg.inv(I)
+    except np.linalg.LinAlgError:
+        cov = np.linalg.pinv(I)
+
+    se = np.sqrt(np.diag(cov))
+    return beta, se, converged
+
+
+def _fit_pairwise_logit(
+    df_model: pd.DataFrame,
+    outcome_var: str,
+    *,
+    use_age_spline: bool = True,
+    age_spline_df: int = 4,
+    extra_terms: list = None,
+    id_col: str = None,
+    force_firth: bool = False
+):
+    """Fit a (pairwise) logistic regression model and return OR/CI/p for `comparison`.
+
+    df_model must contain: outcome_var, age_year, sex_male, comparison, and any extra covariates.
+    """
+    if extra_terms is None:
+        extra_terms = []
+
+    if patsy is None and use_age_spline:
+        # Fall back to linear age if patsy is unavailable
+        use_age_spline = False
+
+    age_term = f"cr(age_year, df={age_spline_df})" if use_age_spline else "age_year"
+    rhs_terms = [age_term, 'sex_male', 'comparison'] + extra_terms
+    formula = f"{outcome_var} ~ " + " + ".join(rhs_terms)
+
+    # Build design matrices
+    if patsy:
+        y, X = patsy.dmatrices(formula, df_model, return_type='dataframe')
+    else:
+        y = df_model[outcome_var].astype(float).values
+        X = sm.add_constant(df_model[['age_year', 'sex_male', 'comparison']].astype(float), has_constant='add')
+
+    y = np.asarray(y).reshape(-1)
+
+    # MLE first (unless forced Firth)
+    if not force_firth:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                model = sm.Logit(y, X)
+                res = model.fit(disp=0, maxiter=200)
+
+            # If clustering is relevant (repeated measures), use cluster-robust SE
+            if id_col is not None and id_col in df_model.columns and df_model[id_col].nunique() < len(df_model):
+                try:
+                    res = res.get_robustcov_results(cov_type='cluster', groups=df_model[id_col])
+                except Exception:
+                    pass
+
+            beta = float(res.params['comparison'])
+            se = float(res.bse['comparison'])
+            p_val = float(res.pvalues['comparison'])
+            model_name = 'Logit (MLE)'
+
+            return beta, se, p_val, model_name
+        except (PerfectSeparationError, np.linalg.LinAlgError, ValueError, OverflowError):
+            pass
+        except Exception:
+            # Any other convergence / numerical issues -> Firth fallback
+            pass
+
+    # Firth fallback
+    X_np = np.asarray(X, dtype=float)
+    beta_vec, se_vec, converged = _firth_logit(X_np, y, maxiter=200, tol=1e-8)
+    # locate 'comparison' column
+    try:
+        j = list(X.columns).index('comparison')
+    except Exception:
+        j = -1
+
+    beta = float(beta_vec[j])
+    se = float(se_vec[j]) if se_vec[j] > 0 else np.nan
+    z = beta / se if se and not np.isnan(se) else np.nan
+    p_val = float(2 * (1 - norm.cdf(abs(z)))) if z == z else np.nan  # z==z checks not-NaN
+    model_name = 'Logit (Firth)' if converged else 'Logit (Firth; not converged)'
+
+    return beta, se, p_val, model_name
+
+
+def create_table4_multivariate_analysis(
+    df: pd.DataFrame,
+    *,
+    reference_category: str = 'Physical Abuse',
+    comparison_categories: list = None,
+    use_age_spline: bool = True,
+    age_spline_df: int = 4,
+    add_year_fe: bool = True,
+    year_col: str = 'year',
+    examiner_col: str = None,
+    add_covariates: list = None,
+    id_col: str = None,
+    stratify_by: str = None,
+    strata_order: list = None,
+    min_n: int = 50,
+    force_firth: bool = False
+) -> pd.DataFrame:
+    """Table 4: Multivariable logistic regression (pairwise vs reference)
+
+    Improvements vs. original:
+      - Optional non-linear age adjustment via restricted cubic spline (patsy.cr).
+      - Optional year fixed effects and examiner fixed effects (if columns exist).
+      - Optional stratified models (e.g., by dentition_type).
+      - Firth logistic regression fallback for small/imbalanced groups (separation).
+    """
     results = []
-    
+
     df_analysis = df.copy()
-    df_analysis['sex_male'] = (df_analysis['sex'] == 'Male').astype(int)
-    
-    reference_category = 'Physical Abuse'
-    comparison_categories = ['Neglect', 'Emotional Abuse', 'Sexual Abuse']
-    
+    if 'sex' in df_analysis.columns:
+        df_analysis['sex_male'] = (df_analysis['sex'] == 'Male').astype(int)
+
+    if comparison_categories is None:
+        comparison_categories = ['Neglect', 'Emotional Abuse', 'Sexual Abuse']
+
     outcomes = [
         ('has_caries', 'Caries Experience (DMFT>0)'),
         ('has_untreated_caries', 'Untreated Caries'),
     ]
-    
+
     if 'gingivitis' in df_analysis.columns:
         df_analysis['gingivitis_binary'] = (df_analysis['gingivitis'] == 'Gingivitis').astype(int)
         outcomes.append(('gingivitis_binary', 'Gingivitis'))
-    
+
     if 'needTOBEtreated' in df_analysis.columns:
         df_analysis['treatment_need'] = (df_analysis['needTOBEtreated'] == 'Treatment Required').astype(int)
         outcomes.append(('treatment_need', 'Treatment Need'))
-    
-    for outcome_var, outcome_label in outcomes:
-        if outcome_var not in df_analysis.columns:
-            continue
-        
-        for comparison in comparison_categories:
-            # Subset for pairwise comparison (Ref vs Target)
-            df_model = df_analysis[df_analysis['abuse'].isin([reference_category, comparison])].copy()
-            df_model = df_model[[outcome_var, 'age_year', 'sex_male', 'abuse']].dropna()
-            
-            if len(df_model) < 50:
+
+    if add_covariates is None:
+        add_covariates = []
+
+    # Determine strata
+    if stratify_by is None:
+        strata = [('Overall', df_analysis)]
+    else:
+        if strata_order is None:
+            strata_vals = [v for v in df_analysis[stratify_by].dropna().unique()]
+            strata_vals = sorted(strata_vals)
+        else:
+            strata_vals = [v for v in strata_order if v in df_analysis[stratify_by].dropna().unique()]
+        strata = [(str(v), df_analysis[df_analysis[stratify_by] == v].copy()) for v in strata_vals]
+
+    for stratum_label, df_stratum in strata:
+        for outcome_var, outcome_label in outcomes:
+            if outcome_var not in df_stratum.columns:
                 continue
-            
-            df_model['comparison'] = (df_model['abuse'] == comparison).astype(int)
-            
-            try:
-                X = np.column_stack([
-                    np.ones(len(df_model)),
-                    df_model['age_year'].values,
-                    df_model['sex_male'].values,
-                    df_model['comparison'].values
-                ])
-                y = df_model[outcome_var].values
-                
-                result = simple_logistic_regression(X, y)
-                
-                odds_ratio = result['odds_ratios'][3]
-                ci_lower = result['ci_lower'][3]
-                ci_upper = result['ci_upper'][3]
-                p_val = result['p_values'][3]
-                
-                results.append({
-                    'Outcome': outcome_label,
-                    'Comparison': f"{comparison} vs {reference_category}",
-                    'Odds Ratio': f"{odds_ratio:.2f}",
-                    '95% CI': f"({ci_lower:.2f}-{ci_upper:.2f})",
-                    'p-value': f"{p_val:.4f}" if p_val >= 0.0001 else "<0.0001",
-                    'Adjusted_for': 'Age, Sex'
-                })
-                
-            except Exception:
-                results.append({
-                    'Outcome': outcome_label,
-                    'Comparison': f"{comparison} vs {reference_category}",
-                    'Odds Ratio': 'N/A',
-                    '95% CI': 'N/A',
-                    'p-value': 'N/A',
-                    'Adjusted_for': 'Age, Sex'
-                })
-    
+
+            for comparison in comparison_categories:
+                df_model = df_stratum[df_stratum['abuse'].isin([reference_category, comparison])].copy()
+
+                needed = [outcome_var, 'age_year', 'sex_male', 'abuse']
+                needed += [c for c in add_covariates if c in df_model.columns]
+
+                # Year / examiner covariates are added as terms only if present
+                if add_year_fe and year_col in df_model.columns:
+                    needed.append(year_col)
+                if examiner_col is not None and examiner_col in df_model.columns:
+                    needed.append(examiner_col)
+
+                if id_col is not None and id_col in df_model.columns:
+                    needed.append(id_col)
+
+                df_model = df_model[needed].dropna()
+
+                if len(df_model) < min_n:
+                    continue
+
+                df_model['comparison'] = (df_model['abuse'] == comparison).astype(int)
+
+                # Extra terms for formula
+                extra_terms = []
+                adjusted_for = []
+
+                if add_year_fe and year_col in df_model.columns:
+                    extra_terms.append(f"C({year_col})")
+                    adjusted_for.append('Year (FE)')
+
+                if examiner_col is not None and examiner_col in df_model.columns:
+                    extra_terms.append(f"C({examiner_col})")
+                    adjusted_for.append('Examiner (FE)')
+
+                for cov in add_covariates:
+                    if cov not in df_model.columns:
+                        continue
+                    # Treat object/category as categorical by default
+                    if pd.api.types.is_object_dtype(df_model[cov]) or pd.api.types.is_categorical_dtype(df_model[cov]):
+                        extra_terms.append(f"C({cov})")
+                        adjusted_for.append(f"{cov} (FE)")
+                    else:
+                        extra_terms.append(cov)
+                        adjusted_for.append(cov)
+
+                adjusted_for_base = ['Age (spline)' if use_age_spline else 'Age', 'Sex']
+                adjusted_for_all = adjusted_for_base + adjusted_for
+
+                try:
+                    beta, se, p_val, model_name = _fit_pairwise_logit(
+                        df_model,
+                        outcome_var,
+                        use_age_spline=use_age_spline,
+                        age_spline_df=age_spline_df,
+                        extra_terms=extra_terms,
+                        id_col=id_col,
+                        force_firth=force_firth
+                    )
+
+                    or_val = float(np.exp(beta))
+                    ci_low = float(np.exp(beta - 1.96 * se)) if se == se else np.nan
+                    ci_up = float(np.exp(beta + 1.96 * se)) if se == se else np.nan
+
+                    results.append({
+                        'Stratum': stratum_label if stratify_by else '',
+                        'Outcome': outcome_label,
+                        'Comparison': f"{comparison} vs {reference_category}",
+                        'N': int(len(df_model)),
+                        'Events': int(df_model[outcome_var].sum()),
+                        'Odds Ratio': f"{or_val:.2f}",
+                        '95% CI': f"({ci_low:.2f}-{ci_up:.2f})" if (ci_low == ci_low and ci_up == ci_up) else 'N/A',
+                        'p-value': f"{p_val:.4f}" if (p_val == p_val and p_val >= 0.0001) else ("<0.0001" if p_val == p_val else 'N/A'),
+                        'Model': model_name,
+                        'Adjusted_for': ', '.join(adjusted_for_all)
+                    })
+                except Exception:
+                    results.append({
+                        'Stratum': stratum_label if stratify_by else '',
+                        'Outcome': outcome_label,
+                        'Comparison': f"{comparison} vs {reference_category}",
+                        'N': int(len(df_model)),
+                        'Events': int(df_model[outcome_var].sum()) if outcome_var in df_model.columns else 'N/A',
+                        'Odds Ratio': 'N/A',
+                        '95% CI': 'N/A',
+                        'p-value': 'N/A',
+                        'Model': 'N/A',
+                        'Adjusted_for': ', '.join(['Age', 'Sex'] + adjusted_for)
+                    })
+
     return pd.DataFrame(results)
 
 def create_table5_dmft_by_lifestage_abuse(df: pd.DataFrame):
@@ -1173,6 +1415,9 @@ def create_table_dmft_by_year_abuse(df: pd.DataFrame):
 def create_forest_plot_vertical(df_logistic, df_original, output_dir, timestamp, figsize=(10, 10)):
     import matplotlib.patches as mpatches
     df = df_logistic.copy()
+    # If stratified results are provided, plot Overall/blank stratum only.
+    if 'Stratum' in df.columns:
+        df = df[df['Stratum'].isin(['', 'Overall'])]
     df = df[df['Odds Ratio'] != 'N/A']
     if df.empty: return
     
@@ -1269,7 +1514,13 @@ def create_visualizations(df, output_dir):
 
 def plot_boxplot_with_dunn(df, var_name, group_col='abuse', title=None, output_dir=None, p_adjust='bonferroni', palette='Set2', yaxis_name=None):
     if output_dir is None: output_dir = './'
-    data = df[[group_col, var_name]].dropna()
+    ratio_vars = {'Care_Index', 'UTN_Score'}
+    cols = [group_col, var_name]
+    if var_name in ratio_vars and 'DMFT_Index' in df.columns:
+        cols.append('DMFT_Index')
+    data = df[cols].dropna()
+    if var_name in ratio_vars and 'DMFT_Index' in data.columns:
+        data = data[data['DMFT_Index'] > 0]
     if data.empty: return
     
     categories = sorted(data[group_col].unique())
