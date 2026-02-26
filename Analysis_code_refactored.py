@@ -26,7 +26,8 @@ try:
         create_visualizations,
         plot_boxplot_with_dunn,
         plot_boxplot_by_dentition_type,
-        generate_summary_report
+        generate_summary_report,
+        create_table_dmft_by_year_abuse
     )
 except ImportError:
     # If running from a different directory, append path
@@ -257,6 +258,11 @@ def main():
     table6 = create_table6_dmft_by_dentition_abuse(df)
     if not table6.empty:
         table6.to_csv(os.path.join(OUTPUT_DIR, f'table6_dmft_dentition_abuse_{timestamp}.csv'), index=False)
+
+    # Table 7: DMFT by Year and Abuse
+    table7 = create_table_dmft_by_year_abuse(df)
+    if not table7.empty:
+        table7.to_csv(os.path.join(OUTPUT_DIR, f'table7_dmft_by_year_abuse_{timestamp}.csv'), index=False)
 
     # Visualization
     create_visualizations(df, OUTPUT_DIR)

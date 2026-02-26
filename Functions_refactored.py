@@ -1030,6 +1030,142 @@ def analyze_dmft_by_dentition_with_pairwise(df):
     else:
         return pd.DataFrame()
 
+def create_table_dmft_by_year_abuse(df: pd.DataFrame):
+    """Table 7: DMFT, Dt, Mt, Ft by Year and Abuse Type"""
+    df_local = df.copy()
+    if 'date' in df_local.columns and not pd.api.types.is_datetime64_any_dtype(df_local['date']):
+        df_local['date'] = pd.to_datetime(df_local['date'], errors='coerce')
+    if 'year' not in df_local.columns and 'date' in df_local.columns:
+        df_local['year'] = df_local['date'].dt.year
+    elif 'year' not in df_local.columns:
+        print("   ⚠ 'year' or 'date' column not found")
+        return pd.DataFrame()
+        
+    df_local['Dt'] = df_local.get('Perm_D', 0) + df_local.get('Baby_d', 0)
+    df_local['Mt'] = df_local.get('Perm_M', 0) + df_local.get('Baby_m', 0)
+    df_local['Ft'] = df_local.get('Perm_F', 0) + df_local.get('Baby_f', 0)
+    
+    abuse_types = list(df_local['abuse'].cat.categories) if hasattr(df_local['abuse'], 'cat') else sorted(df_local['abuse'].dropna().unique())
+    years = sorted(df_local['year'].dropna().unique())
+    
+    results = []
+    
+    vars_to_summarize = [
+        ('DMFT_Index', 'DMFT'),
+        ('Dt', 'Dt (Untreated)'),
+        ('Mt', 'Mt (Missing)'),
+        ('Ft', 'Ft (Filled)')
+    ]
+    
+    for year in years:
+        df_year = df_local[df_local['year'] == year]
+        
+        groups_dmft = [df_year[df_year['abuse'] == abuse]['DMFT_Index'].dropna() 
+                       for abuse in abuse_types]
+        groups_dmft = [g for g in groups_dmft if len(g) > 0]
+        
+        if len(groups_dmft) >= 2:
+            try:
+                _, p_kw = kruskal(*groups_dmft)
+                p_val_str = f"{p_kw:.4f}" if p_kw >= 0.0001 else "<0.0001"
+            except:
+                p_val_str = "N/A"
+        else:
+            p_val_str = "N/A"
+        
+        first_row = True
+        for abuse in abuse_types:
+            subset = df_year[df_year['abuse'] == abuse]
+            n = len(subset)
+            
+            if n == 0:
+                continue
+            
+            row = {
+                'Year': int(year) if first_row else '',
+                'Abuse_Type': abuse,
+                'N': n
+            }
+            
+            for var_col, var_name in vars_to_summarize:
+                data = subset[var_col].dropna()
+                if len(data) > 0:
+                    row[f'{var_name} Mean (SD)'] = f"{data.mean():.2f} ({data.std():.2f})"
+                    row[f'{var_name} Median [IQR]'] = f"{data.median():.1f} [{data.quantile(0.25):.1f}-{data.quantile(0.75):.1f}]"
+                else:
+                    row[f'{var_name} Mean (SD)'] = "N/A"
+                    row[f'{var_name} Median [IQR]'] = "N/A"
+                    
+            row['DMFT p-value (KW)'] = p_val_str if first_row else ''
+            results.append(row)
+            first_row = False
+            
+    # Overall Summary
+    empty_row = {
+        'Year': '=== OVERALL BY YEAR ===',
+        'Abuse_Type': '(Combined)',
+        'N': '---',
+    }
+    for _, var_name in vars_to_summarize:
+        empty_row[f'{var_name} Mean (SD)'] = '---'
+        empty_row[f'{var_name} Median [IQR]'] = '---'
+    empty_row['DMFT p-value (KW)'] = '---'
+    results.append(empty_row)
+    
+    year_groups = [df_local[df_local['year'] == y]['DMFT_Index'].dropna() 
+                   for y in years]
+    year_groups = [g for g in year_groups if len(g) > 0]
+    
+    if len(year_groups) >= 2:
+        try:
+            _, p_kw_year = kruskal(*year_groups)
+            p_val_year_str = f"{p_kw_year:.4f}" if p_kw_year >= 0.0001 else "<0.0001"
+        except:
+            p_val_year_str = "N/A"
+    else:
+        p_val_year_str = "N/A"
+    
+    first_year = True
+    for year in years:
+        subset = df_local[df_local['year'] == year]
+        n = len(subset)
+        if n > 0:
+            subset_dmft = subset['DMFT_Index'].dropna()
+            row = {
+                'Year': int(year),
+                'Abuse_Type': 'All abuse types',
+                'N': n
+            }
+            if len(subset_dmft) > 0:
+                row.update({
+                    'Mean': f"{subset_dmft.mean():.2f}",
+                    'SD': f"{subset_dmft.std():.2f}",
+                    'Median': f"{subset_dmft.median():.1f}",
+                    '25%': f"{subset_dmft.quantile(0.25):.1f}",
+                    '75%': f"{subset_dmft.quantile(0.75):.1f}",
+                    'Min': f"{subset_dmft.min():.0f}",
+                    'Max': f"{subset_dmft.max():.0f}"
+                })
+            else:
+                row.update({
+                    'Mean': "N/A", 'SD': "N/A", 'Median': "N/A", 
+                    '25%': "N/A", '75%': "N/A", 'Min': "N/A", 'Max': "N/A"
+                })
+                
+            for var_col, var_name in vars_to_summarize:
+                data = subset[var_col].dropna()
+                if len(data) > 0:
+                    row[f'{var_name} Mean (SD)'] = f"{data.mean():.2f} ({data.std():.2f})"
+                    row[f'{var_name} Median [IQR]'] = f"{data.median():.1f} [{data.quantile(0.25):.1f}-{data.quantile(0.75):.1f}]"
+                else:
+                    row[f'{var_name} Mean (SD)'] = "N/A"
+                    row[f'{var_name} Median [IQR]'] = "N/A"
+            row['DMFT p-value (KW)'] = p_val_year_str if first_year else ''
+            results.append(row)
+            first_year = False
+            
+    return pd.DataFrame(results)
+
 def create_forest_plot_vertical(df_logistic, df_original, output_dir, timestamp, figsize=(10, 10)):
     import matplotlib.patches as mpatches
     df = df_logistic.copy()
