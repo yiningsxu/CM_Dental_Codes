@@ -950,20 +950,20 @@ def create_table5_5_caries_prevalence_treatment(df: pd.DataFrame):
     results.append(row_fully_treated)
     
     # No filled teeth
-    row_no_filled = {'Variable': 'No Filled Teeth', 'Category': 'f+F = 0'}
+    row_no_filled = {'Variable': 'No Filled Teeth', 'Category': 'DMFT_Index > 0 and f+F = 0'}
     for abuse in abuse_types:
         subset = df_local[df_local['abuse'] == abuse]
         n_total = len(subset)
-        n_no_filled = (subset['filled_total'] == 0).sum()
+        n_no_filled = ((subset['DMFT_Index'] > 0) & (subset['filled_total'] == 0)).sum()
         pct = (n_no_filled / n_total * 100) if n_total > 0 else 0
         row_no_filled[abuse] = f"{n_no_filled}/{n_total} ({pct:.1f}%)"
     
     n_total_all = len(df_local)
-    n_no_filled_all = (df_local['filled_total'] == 0).sum()
+    n_no_filled_all = ((df_local['DMFT_Index'] > 0) & (df_local['filled_total'] == 0)).sum()
     pct_no_filled = (n_no_filled_all / n_total_all * 100) if n_total_all > 0 else 0
     row_no_filled['Total'] = f"{n_no_filled_all}/{n_total_all} ({pct_no_filled:.1f}%)"
     
-    df_local['has_no_filled'] = (df_local['filled_total'] == 0).astype(int)
+    df_local['has_no_filled'] = ((df_local['DMFT_Index'] > 0) & (df_local['filled_total'] == 0)).astype(int)
     try:
         contingency_nofilled = pd.crosstab(df_local['abuse'], df_local['has_no_filled'])
         _, p_val, _, _ = chi2_contingency(contingency_nofilled)

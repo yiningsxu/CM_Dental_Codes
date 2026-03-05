@@ -89,7 +89,7 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
     baby_cols = [c for c in baby_teeth_cols if c in df.columns]
 
     # Coding:
-    # -1: unerupted, 0: sound, 1: filled, 2: C0, 3: decayed, 4: missing, ...
+    # -1: 未萌出、0: 健全、1: 処置歯、2: C0、3: C、4: 喪失歯、5: その他過剰歯等、6: 先天性欠損、7: 歯牙破折、8: 乳歯晩期残存、9: 癒合歯
     if perm_cols:
         df['Perm_D'] = (df[perm_cols] == 3).sum(axis=1)
         df['Perm_M'] = (df[perm_cols] == 4).sum(axis=1)
@@ -146,6 +146,8 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
     # Binary outcomes
     df['has_caries'] = (df['DMFT_Index'] > 0).astype(int)
     df['has_untreated_caries'] = (decayed_total > 0).astype(int)
+
+    df.to_csv('/Users/ayo/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analysis/data/df.csv', index=False)
 
     # Dentition type
     def get_dentition_type(row):
