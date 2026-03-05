@@ -227,9 +227,13 @@ def main():
         else: return 'mixed_dentition'
         
     df['dentition_type'] = df.apply(get_dentition_type, axis=1)
+    df.to_csv(os.path.join(OUTPUT_DIR, f'df_{timestamp}.csv'), index=False)
 
     # Basic stats
     logger.info(f"DMFT Mean: {df['DMFT_Index'].mean():.2f}")
+    logger.info(f"DMFT C0 Mean: {df['DMFT_Index_C0'].mean():.2f}")
+    logger.info(f"Care Index Mean: {df['Care_Index'].mean():.2f}")
+    logger.info(f"Healthy Rate Mean: {df['Healthy_Rate'].mean():.2f}")
 
     # ============================================================================
     # Analysis & Reporting
