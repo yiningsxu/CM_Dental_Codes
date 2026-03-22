@@ -366,7 +366,8 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
         df_var = _df_for_var(df, var).dropna(subset=[var, 'abuse'])
 
         try:
-            dunn_adj, dunn_unadj = posthoc_dunn(df_var, val_col=var, group_col='abuse', p_adjust='bonferroni')
+            dunn_adj = sp.posthoc_dunn(df_var, val_col=var, group_col='abuse', p_adjust='bonferroni')
+            dunn_unadj = sp.posthoc_dunn(df_var, val_col=var, group_col='abuse', p_adjust=None)
 
             for i, abuse1 in enumerate(abuse_types):
                 for abuse2 in abuse_types[i+1:]:
@@ -390,8 +391,8 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                             'significant': p_adj < 0.05,
                             'analysis_type': 'Table 3: Overall'
                         })
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[POSTHOC ERROR] var={var}: {e}")
 
     # Pairwise Mann–Whitney (optional; sensitivity)
     pairwise_results = []
@@ -427,6 +428,7 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                 })
             except Exception:
                 pass
+    print(posthoc_results)
 
     return pd.DataFrame(overall_results), pd.DataFrame(posthoc_results), pd.DataFrame(pairwise_results), tidy_posthoc_pairwise
 
