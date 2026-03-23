@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import seaborn as sns
 from scipy.stats import chi2_contingency, kruskal, mannwhitneyu, norm
 import scikit_posthocs as sp
