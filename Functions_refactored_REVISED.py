@@ -407,6 +407,30 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                         g1_mean_rank = mean_ranks.get(abuse1, np.nan)
                         g2_mean_rank = mean_ranks.get(abuse2, np.nan)
 
+                        g1_mean_sd_str = (
+                            f"{g1_mean:.2f} ± {g1_sd:.2f}"
+                            if pd.notna(g1_mean) and pd.notna(g1_sd)
+                            else (f"{g1_mean:.2f}" if pd.notna(g1_mean) else np.nan)
+                        )
+
+                        g2_mean_sd_str = (
+                            f"{g2_mean:.2f} ± {g2_sd:.2f}"
+                            if pd.notna(g2_mean) and pd.notna(g2_sd)
+                            else (f"{g2_mean:.2f}" if pd.notna(g2_mean) else np.nan)
+                        )
+
+                        g1_median_iqr_str = (
+                            f"{g1_median:.2f} [{g1_q1:.2f}-{g1_q3:.2f}]"
+                            if pd.notna(g1_median) and pd.notna(g1_q1) and pd.notna(g1_q3)
+                            else np.nan
+                        )
+
+                        g2_median_iqr_str = (
+                            f"{g2_median:.2f} [{g2_q1:.2f}-{g2_q3:.2f}]"
+                            if pd.notna(g2_median) and pd.notna(g2_q1) and pd.notna(g2_q3)
+                            else np.nan
+                        )
+
                         posthoc_results.append({
                             'Variable': var,
                             'Group1': abuse1,
@@ -424,6 +448,11 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                             'Group2_Median': round(g2_median, 2) if pd.notna(g2_median) else np.nan,
                             'Group1_IQR': f"{g1_q1:.2f}-{g1_q3:.2f}" if pd.notna(g1_q1) and pd.notna(g1_q3) else np.nan,
                             'Group2_IQR': f"{g2_q1:.2f}-{g2_q3:.2f}" if pd.notna(g2_q1) and pd.notna(g2_q3) else np.nan,
+
+                            'Group1_Mean_SD': g1_mean_sd_str,
+                            'Group2_Mean_SD': g2_mean_sd_str,
+                            'Group1_Median_IQR': g1_median_iqr_str,
+                            'Group2_Median_IQR': g2_median_iqr_str,
 
                             'Group1_Mean_Rank': round(g1_mean_rank, 2) if pd.notna(g1_mean_rank) else np.nan,
                             'Group2_Mean_Rank': round(g2_mean_rank, 2) if pd.notna(g2_mean_rank) else np.nan,
@@ -451,6 +480,11 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                             'group1_q3': g1_q3,
                             'group2_q1': g2_q1,
                             'group2_q3': g2_q3,
+
+                            'group1_mean_sd_str': g1_mean_sd_str,
+                            'group2_mean_sd_str': g2_mean_sd_str,
+                            'group1_median_iqr_str': g1_median_iqr_str,
+                            'group2_median_iqr_str': g2_median_iqr_str,
 
                             'group1_mean_rank': g1_mean_rank,
                             'group2_mean_rank': g2_mean_rank,
