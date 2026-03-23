@@ -1172,66 +1172,693 @@ def create_table5_5_caries_prevalence_treatment(df: pd.DataFrame):
     return pd.DataFrame(results), tidy_posthoc
 
 def create_table6_dmft_by_dentition_abuse(df: pd.DataFrame):
-    """Table 6: DMFT by Dentition Type"""
-    required_cols = ['DMFT_Index', 'Present_Teeth', 'Perm_total_teeth', 'Present_Perm_Teeth', 'abuse']
+    """Table 6: DMFT by Dentition Type and Abuse Type
+
+    Returns
+    -------
+    summary_table : pd.DataFrame
+        Descriptive table by dentition_type × abuse
+    within_dentition_posthoc : pd.DataFrame
+        Within each dentition type, compare abuse subtypes
+    within_abuse_posthoc : pd.DataFrame
+        Within each abuse subtype, compare dentition types
+    overall_dentition_posthoc : pd.DataFrame
+        Overall comparison across dentition types (ignoring abuse subtype)
+    """
+    required_cols = [
+        'DMFT_Index', 'Present_Teeth', 'Present_Perm_Teeth', 'abuse'
+    ]
     for col in required_cols:
         if col not in df.columns:
             print(f"   ⚠ '{col}' column not found")
-            return pd.DataFrame()
-            
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
     df_analysis = df.copy()
+
+    # create dentition_type if not present
     if 'dentition_type' not in df_analysis.columns:
+        if 'Present_Baby_Teeth' not in df_analysis.columns:
+            print("   ⚠ 'Present_Baby_Teeth' column not found")
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
         def get_dentition_type(row):
             present_teeth = row['Present_Teeth'] if pd.notna(row['Present_Teeth']) else 0
             present_baby = row['Present_Baby_Teeth'] if pd.notna(row['Present_Baby_Teeth']) else 0
             present_perm = row['Present_Perm_Teeth'] if pd.notna(row['Present_Perm_Teeth']) else 0
-            
-            if present_teeth == 0: return 'No_Teeth'
-            elif present_baby == present_teeth and present_perm == 0: return 'primary_dentition'
-            elif present_perm == present_teeth and present_baby == 0: return 'permanent_dentition'
-            else: return 'mixed_dentition'
-            
+
+            if present_teeth == 0:
+                return 'No_Teeth'
+            elif present_baby == present_teeth and present_perm == 0:
+                return 'primary_dentition'
+            elif present_perm == present_teeth and present_baby == 0:
+                return 'permanent_dentition'
+            else:
+                return 'mixed_dentition'
+
         df_analysis['dentition_type'] = df_analysis.apply(get_dentition_type, axis=1)
-        
-    abuse_types = list(df['abuse'].cat.categories)
+
+    # orders
+    abuse_types = list(df_analysis['abuse'].cat.categories) if pd.api.types.is_categorical_dtype(df_analysis['abuse']) else sorted(df_analysis['abuse'].dropna().unique())
     dentition_order = ['primary_dentition', 'mixed_dentition', 'permanent_dentition']
-    
-    results = []
-    
+
+    # keep only target dentition categories
+    df_analysis = df_analysis[df_analysis['dentition_type'].isin(dentition_order)].copy()
+
+    # -----------------------------
+    # 1) summary table (your current style + richer descriptive values)
+    # -----------------------------
+    summary_results = []
+
     for dent_type in dentition_order:
         df_dent = df_analysis[df_analysis['dentition_type'] == dent_type]
-        if len(df_dent) == 0: continue
-        
+        if len(df_dent) == 0:
+            continue
+
         groups = [df_dent[df_dent['abuse'] == abuse]['DMFT_Index'].dropna() for abuse in abuse_types]
         groups = [g for g in groups if len(g) > 0]
-        
+
         if len(groups) >= 2:
             try:
                 _, p_kw = kruskal(*groups)
                 p_val_str = f"{p_kw:.4f}" if p_kw >= 0.0001 else "<0.0001"
-            except:
+            except Exception:
                 p_val_str = "N/A"
         else:
             p_val_str = "N/A"
-            
+
         first_row = True
         for abuse in abuse_types:
-            subset = df_dent[(df_dent['abuse'] == abuse)]['DMFT_Index'].dropna()
-            if len(subset) == 0: continue
-            
+            subset = df_dent[df_dent['abuse'] == abuse]['DMFT_Index'].dropna()
+            if len(subset) == 0:
+                continue
+
+            mean_val = subset.mean()
+            sd_val = subset.std(ddof=1) if len(subset) > 1 else np.nan
+            median_val = subset.median()
+            q1 = subset.quantile(0.25)
+            q3 = subset.quantile(0.75)
+
             row = {
                 'Dentition_Type': dent_type if first_row else '',
                 'Abuse_Type': abuse,
                 'N': len(subset),
-                'Mean': f"{subset.mean():.2f}",
-                'SD': f"{subset.std():.2f}",
-                'Median': f"{subset.median():.1f}",
-                'p-value (KW)': p_val_str if first_row else ''
+                'Mean': round(mean_val, 2) if pd.notna(mean_val) else np.nan,
+                'SD': round(sd_val, 2) if pd.notna(sd_val) else np.nan,
+                'Median': round(median_val, 2) if pd.notna(median_val) else np.nan,
+                'IQR': f"{q1:.2f}-{q3:.2f}" if pd.notna(q1) and pd.notna(q3) else np.nan,
+                'Mean_SD': f"{mean_val:.2f} ± {sd_val:.2f}" if pd.notna(mean_val) and pd.notna(sd_val) else (f"{mean_val:.2f}" if pd.notna(mean_val) else np.nan),
+                'Median_IQR': f"{median_val:.2f} [{q1:.2f}-{q3:.2f}]" if pd.notna(median_val) and pd.notna(q1) and pd.notna(q3) else np.nan,
+                'p-value (KW within dentition)': p_val_str if first_row else ''
             }
-            results.append(row)
+            summary_results.append(row)
             first_row = False
-            
-    return pd.DataFrame(results)
+
+    summary_table = pd.DataFrame(summary_results)
+
+    # -------------------------------------------------
+    # 2) Within each dentition type: abuse subtype comparison
+    # -------------------------------------------------
+    within_dentition_posthoc = []
+
+    for dent_type in dentition_order:
+        df_dent = df_analysis[df_analysis['dentition_type'] == dent_type].dropna(subset=['DMFT_Index', 'abuse']).copy()
+        if len(df_dent) == 0:
+            continue
+
+        groups = [df_dent[df_dent['abuse'] == abuse]['DMFT_Index'].dropna() for abuse in abuse_types]
+        groups = [g for g in groups if len(g) > 0]
+
+        if len(groups) < 2:
+            continue
+
+        try:
+            _, p_kw = kruskal(*groups)
+        except Exception:
+            continue
+
+        if p_kw >= 0.05:
+            continue
+
+        df_dent['_rank'] = df_dent['DMFT_Index'].rank(method='average')
+        mean_ranks = df_dent.groupby('abuse', observed=False)['_rank'].mean().to_dict()
+
+        try:
+            dunn_adj = posthoc_dunn(df_dent, val_col='DMFT_Index', group_col='abuse', p_adjust='bonferroni')
+            dunn_unadj = posthoc_dunn(df_dent, val_col='DMFT_Index', group_col='abuse', p_adjust=None)
+        except Exception as e:
+            print(f"[POSTHOC ERROR - within dentition] dentition={dent_type}: {e}")
+            continue
+
+        for i, abuse1 in enumerate(abuse_types):
+            for abuse2 in abuse_types[i+1:]:
+                if (
+                    abuse1 in dunn_adj.index and abuse2 in dunn_adj.columns and
+                    abuse1 in dunn_unadj.index and abuse2 in dunn_unadj.columns
+                ):
+                    vals1 = df_dent[df_dent['abuse'] == abuse1]['DMFT_Index'].dropna()
+                    vals2 = df_dent[df_dent['abuse'] == abuse2]['DMFT_Index'].dropna()
+                    if len(vals1) == 0 or len(vals2) == 0:
+                        continue
+
+                    p_adj = float(dunn_adj.loc[abuse1, abuse2])
+                    p_unadj = float(dunn_unadj.loc[abuse1, abuse2])
+
+                    n1, n2 = len(vals1), len(vals2)
+                    mean1, mean2 = vals1.mean(), vals2.mean()
+                    sd1 = vals1.std(ddof=1) if n1 > 1 else np.nan
+                    sd2 = vals2.std(ddof=1) if n2 > 1 else np.nan
+                    med1, med2 = vals1.median(), vals2.median()
+                    q1_1, q3_1 = vals1.quantile(0.25), vals1.quantile(0.75)
+                    q1_2, q3_2 = vals2.quantile(0.25), vals2.quantile(0.75)
+                    mr1, mr2 = mean_ranks.get(abuse1, np.nan), mean_ranks.get(abuse2, np.nan)
+
+                    within_dentition_posthoc.append({
+                        'Analysis': 'Within dentition: abuse subtype comparison',
+                        'Dentition_Type': dent_type,
+                        'Variable': 'DMFT_Index',
+                        'Group1': abuse1,
+                        'Group2': abuse2,
+                        'Comparison': f"{abuse1} vs {abuse2}",
+                        'Group1_n': n1,
+                        'Group2_n': n2,
+                        'Group1_Mean': round(mean1, 2),
+                        'Group2_Mean': round(mean2, 2),
+                        'Group1_SD': round(sd1, 2) if pd.notna(sd1) else np.nan,
+                        'Group2_SD': round(sd2, 2) if pd.notna(sd2) else np.nan,
+                        'Group1_Median': round(med1, 2),
+                        'Group2_Median': round(med2, 2),
+                        'Group1_IQR': f"{q1_1:.2f}-{q3_1:.2f}",
+                        'Group2_IQR': f"{q1_2:.2f}-{q3_2:.2f}",
+                        'Group1_Mean_SD': f"{mean1:.2f} ± {sd1:.2f}" if pd.notna(sd1) else f"{mean1:.2f}",
+                        'Group2_Mean_SD': f"{mean2:.2f} ± {sd2:.2f}" if pd.notna(sd2) else f"{mean2:.2f}",
+                        'Group1_Median_IQR': f"{med1:.2f} [{q1_1:.2f}-{q3_1:.2f}]",
+                        'Group2_Median_IQR': f"{med2:.2f} [{q1_2:.2f}-{q3_2:.2f}]",
+                        'Group1_Mean_Rank': round(mr1, 2) if pd.notna(mr1) else np.nan,
+                        'Group2_Mean_Rank': round(mr2, 2) if pd.notna(mr2) else np.nan,
+                        'KW_p_value': f"{p_kw:.4f}" if p_kw >= 0.0001 else "<0.0001",
+                        'p-value (unadjusted)': f"{p_unadj:.4f}" if p_unadj >= 0.0001 else "<0.0001",
+                        'p-value (adjusted)': f"{p_adj:.4f}" if p_adj >= 0.0001 else "<0.0001",
+                        'Significant': 'Yes' if p_adj < 0.05 else 'No'
+                    })
+
+    within_dentition_posthoc = pd.DataFrame(within_dentition_posthoc)
+
+    # -------------------------------------------------
+    # 3) Within each abuse subtype: dentition period comparison
+    # -------------------------------------------------
+    within_abuse_posthoc = []
+
+    for abuse in abuse_types:
+        df_abuse = df_analysis[df_analysis['abuse'] == abuse].dropna(subset=['DMFT_Index', 'dentition_type']).copy()
+        if len(df_abuse) == 0:
+            continue
+
+        groups = [df_abuse[df_abuse['dentition_type'] == dent]['DMFT_Index'].dropna() for dent in dentition_order]
+        groups = [g for g in groups if len(g) > 0]
+
+        if len(groups) < 2:
+            continue
+
+        try:
+            _, p_kw = kruskal(*groups)
+        except Exception:
+            continue
+
+        if p_kw >= 0.05:
+            continue
+
+        df_abuse['_rank'] = df_abuse['DMFT_Index'].rank(method='average')
+        mean_ranks = df_abuse.groupby('dentition_type', observed=False)['_rank'].mean().to_dict()
+
+        try:
+            dunn_adj = posthoc_dunn(df_abuse, val_col='DMFT_Index', group_col='dentition_type', p_adjust='bonferroni')
+            dunn_unadj = posthoc_dunn(df_abuse, val_col='DMFT_Index', group_col='dentition_type', p_adjust=None)
+        except Exception as e:
+            print(f"[POSTHOC ERROR - within abuse] abuse={abuse}: {e}")
+            continue
+
+        for i, dent1 in enumerate(dentition_order):
+            for dent2 in dentition_order[i+1:]:
+                if (
+                    dent1 in dunn_adj.index and dent2 in dunn_adj.columns and
+                    dent1 in dunn_unadj.index and dent2 in dunn_unadj.columns
+                ):
+                    vals1 = df_abuse[df_abuse['dentition_type'] == dent1]['DMFT_Index'].dropna()
+                    vals2 = df_abuse[df_abuse['dentition_type'] == dent2]['DMFT_Index'].dropna()
+                    if len(vals1) == 0 or len(vals2) == 0:
+                        continue
+
+                    p_adj = float(dunn_adj.loc[dent1, dent2])
+                    p_unadj = float(dunn_unadj.loc[dent1, dent2])
+
+                    n1, n2 = len(vals1), len(vals2)
+                    mean1, mean2 = vals1.mean(), vals2.mean()
+                    sd1 = vals1.std(ddof=1) if n1 > 1 else np.nan
+                    sd2 = vals2.std(ddof=1) if n2 > 1 else np.nan
+                    med1, med2 = vals1.median(), vals2.median()
+                    q1_1, q3_1 = vals1.quantile(0.25), vals1.quantile(0.75)
+                    q1_2, q3_2 = vals2.quantile(0.25), vals2.quantile(0.75)
+                    mr1, mr2 = mean_ranks.get(dent1, np.nan), mean_ranks.get(dent2, np.nan)
+
+                    within_abuse_posthoc.append({
+                        'Analysis': 'Within abuse subtype: dentition comparison',
+                        'Abuse_Type': abuse,
+                        'Variable': 'DMFT_Index',
+                        'Group1': dent1,
+                        'Group2': dent2,
+                        'Comparison': f"{dent1} vs {dent2}",
+                        'Group1_n': n1,
+                        'Group2_n': n2,
+                        'Group1_Mean': round(mean1, 2),
+                        'Group2_Mean': round(mean2, 2),
+                        'Group1_SD': round(sd1, 2) if pd.notna(sd1) else np.nan,
+                        'Group2_SD': round(sd2, 2) if pd.notna(sd2) else np.nan,
+                        'Group1_Median': round(med1, 2),
+                        'Group2_Median': round(med2, 2),
+                        'Group1_IQR': f"{q1_1:.2f}-{q3_1:.2f}",
+                        'Group2_IQR': f"{q1_2:.2f}-{q3_2:.2f}",
+                        'Group1_Mean_SD': f"{mean1:.2f} ± {sd1:.2f}" if pd.notna(sd1) else f"{mean1:.2f}",
+                        'Group2_Mean_SD': f"{mean2:.2f} ± {sd2:.2f}" if pd.notna(sd2) else f"{mean2:.2f}",
+                        'Group1_Median_IQR': f"{med1:.2f} [{q1_1:.2f}-{q3_1:.2f}]",
+                        'Group2_Median_IQR': f"{med2:.2f} [{q1_2:.2f}-{q3_2:.2f}]",
+                        'Group1_Mean_Rank': round(mr1, 2) if pd.notna(mr1) else np.nan,
+                        'Group2_Mean_Rank': round(mr2, 2) if pd.notna(mr2) else np.nan,
+                        'KW_p_value': f"{p_kw:.4f}" if p_kw >= 0.0001 else "<0.0001",
+                        'p-value (unadjusted)': f"{p_unadj:.4f}" if p_unadj >= 0.0001 else "<0.0001",
+                        'p-value (adjusted)': f"{p_adj:.4f}" if p_adj >= 0.0001 else "<0.0001",
+                        'Significant': 'Yes' if p_adj < 0.05 else 'No'
+                    })
+
+    within_abuse_posthoc = pd.DataFrame(within_abuse_posthoc)
+
+    # -------------------------------------------------
+    # 4) Overall dentition comparison (ignoring abuse subtype)
+    # -------------------------------------------------
+    overall_dentition_posthoc = []
+
+    df_overall = df_analysis.dropna(subset=['DMFT_Index', 'dentition_type']).copy()
+    groups = [df_overall[df_overall['dentition_type'] == dent]['DMFT_Index'].dropna() for dent in dentition_order]
+    groups = [g for g in groups if len(g) > 0]
+
+    if len(groups) >= 2:
+        try:
+            _, p_kw = kruskal(*groups)
+            if p_kw < 0.05:
+                df_overall['_rank'] = df_overall['DMFT_Index'].rank(method='average')
+                mean_ranks = df_overall.groupby('dentition_type', observed=False)['_rank'].mean().to_dict()
+
+                dunn_adj = posthoc_dunn(df_overall, val_col='DMFT_Index', group_col='dentition_type', p_adjust='bonferroni')
+                dunn_unadj = posthoc_dunn(df_overall, val_col='DMFT_Index', group_col='dentition_type', p_adjust=None)
+
+                for i, dent1 in enumerate(dentition_order):
+                    for dent2 in dentition_order[i+1:]:
+                        if (
+                            dent1 in dunn_adj.index and dent2 in dunn_adj.columns and
+                            dent1 in dunn_unadj.index and dent2 in dunn_unadj.columns
+                        ):
+                            vals1 = df_overall[df_overall['dentition_type'] == dent1]['DMFT_Index'].dropna()
+                            vals2 = df_overall[df_overall['dentition_type'] == dent2]['DMFT_Index'].dropna()
+                            if len(vals1) == 0 or len(vals2) == 0:
+                                continue
+
+                            p_adj = float(dunn_adj.loc[dent1, dent2])
+                            p_unadj = float(dunn_unadj.loc[dent1, dent2])
+
+                            n1, n2 = len(vals1), len(vals2)
+                            mean1, mean2 = vals1.mean(), vals2.mean()
+                            sd1 = vals1.std(ddof=1) if n1 > 1 else np.nan
+                            sd2 = vals2.std(ddof=1) if n2 > 1 else np.nan
+                            med1, med2 = vals1.median(), vals2.median()
+                            q1_1, q3_1 = vals1.quantile(0.25), vals1.quantile(0.75)
+                            q1_2, q3_2 = vals2.quantile(0.25), vals2.quantile(0.75)
+                            mr1, mr2 = mean_ranks.get(dent1, np.nan), mean_ranks.get(dent2, np.nan)
+
+                            overall_dentition_posthoc.append({
+                                'Analysis': 'Overall dentition comparison',
+                                'Variable': 'DMFT_Index',
+                                'Group1': dent1,
+                                'Group2': dent2,
+                                'Comparison': f"{dent1} vs {dent2}",
+                                'Group1_n': n1,
+                                'Group2_n': n2,
+                                'Group1_Mean': round(mean1, 2),
+                                'Group2_Mean': round(mean2, 2),
+                                'Group1_SD': round(sd1, 2) if pd.notna(sd1) else np.nan,
+                                'Group2_SD': round(sd2, 2) if pd.notna(sd2) else np.nan,
+                                'Group1_Median': round(med1, 2),
+                                'Group2_Median': round(med2, 2),
+                                'Group1_IQR': f"{q1_1:.2f}-{q3_1:.2f}",
+                                'Group2_IQR': f"{q1_2:.2f}-{q3_2:.2f}",
+                                'Group1_Mean_SD': f"{mean1:.2f} ± {sd1:.2f}" if pd.notna(sd1) else f"{mean1:.2f}",
+                                'Group2_Mean_SD': f"{mean2:.2f} ± {sd2:.2f}" if pd.notna(sd2) else f"{mean2:.2f}",
+                                'Group1_Median_IQR': f"{med1:.2f} [{q1_1:.2f}-{q3_1:.2f}]",
+                                'Group2_Median_IQR': f"{med2:.2f} [{q1_2:.2f}-{q3_2:.2f}]",
+                                'Group1_Mean_Rank': round(mr1, 2) if pd.notna(mr1) else np.nan,
+                                'Group2_Mean_Rank': round(mr2, 2) if pd.notna(mr2) else np.nan,
+                                'KW_p_value': f"{p_kw:.4f}" if p_kw >= 0.0001 else "<0.0001",
+                                'p-value (unadjusted)': f"{p_unadj:.4f}" if p_unadj >= 0.0001 else "<0.0001",
+                                'p-value (adjusted)': f"{p_adj:.4f}" if p_adj >= 0.0001 else "<0.0001",
+                                'Significant': 'Yes' if p_adj < 0.05 else 'No'
+                            })
+        except Exception as e:
+            print(f"[POSTHOC ERROR - overall dentition]: {e}")
+
+    overall_dentition_posthoc = pd.DataFrame(overall_dentition_posthoc)
+
+    return summary_table, within_dentition_posthoc, within_abuse_posthoc, overall_dentition_posthoc
+
+def plot_dmft_by_dentition_abuse(
+    df: pd.DataFrame,
+    within_dentition_posthoc: pd.DataFrame,
+    within_abuse_posthoc: pd.DataFrame = None,
+    y_col: str = 'DMFT_Index',
+    show_points: bool = True,
+    show_within_dentition_sig: bool = True,
+    show_within_abuse_sig: bool = False,
+    figsize=(18, 9),
+    save_path: str = None
+):
+    """
+    Plot DMFT_Index by dentition period and abuse subtype.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Original dataframe
+    within_dentition_posthoc : pd.DataFrame
+        Output from create_table6_dmft_by_dentition_abuse()[1]
+    within_abuse_posthoc : pd.DataFrame, optional
+        Output from create_table6_dmft_by_dentition_abuse()[2]
+    y_col : str
+        Outcome variable to plot
+    show_points : bool
+        Whether to overlay individual data points
+    show_within_dentition_sig : bool
+        Whether to annotate significant abuse-subtype pairs within each dentition period
+    show_within_abuse_sig : bool
+        Whether to annotate significant dentition pairs within each abuse subtype
+    figsize : tuple
+        Figure size
+    save_path : str, optional
+        Path to save figure
+    """
+
+    df_plot = df.copy()
+
+    # -----------------------------
+    # 1) create dentition_type if needed
+    # -----------------------------
+    if 'dentition_type' not in df_plot.columns:
+        required = ['Present_Teeth', 'Present_Baby_Teeth', 'Present_Perm_Teeth']
+        missing = [c for c in required if c not in df_plot.columns]
+        if missing:
+            raise ValueError(f"Missing columns for dentition_type creation: {missing}")
+
+        def get_dentition_type(row):
+            present_teeth = row['Present_Teeth'] if pd.notna(row['Present_Teeth']) else 0
+            present_baby = row['Present_Baby_Teeth'] if pd.notna(row['Present_Baby_Teeth']) else 0
+            present_perm = row['Present_Perm_Teeth'] if pd.notna(row['Present_Perm_Teeth']) else 0
+
+            if present_teeth == 0:
+                return 'No_Teeth'
+            elif present_baby == present_teeth and present_perm == 0:
+                return 'primary_dentition'
+            elif present_perm == present_teeth and present_baby == 0:
+                return 'permanent_dentition'
+            else:
+                return 'mixed_dentition'
+
+        df_plot['dentition_type'] = df_plot.apply(get_dentition_type, axis=1)
+
+    # -----------------------------
+    # 2) orders
+    # -----------------------------
+    dentition_order = ['primary_dentition', 'mixed_dentition', 'permanent_dentition']
+
+    if pd.api.types.is_categorical_dtype(df_plot['abuse']):
+        abuse_order = [x for x in df_plot['abuse'].cat.categories if pd.notna(x)]
+    else:
+        preferred_order = ['Physical Abuse', 'Neglect', 'Emotional Abuse', 'Sexual Abuse']
+        existing = df_plot['abuse'].dropna().unique().tolist()
+        abuse_order = [x for x in preferred_order if x in existing]
+        abuse_order += [x for x in sorted(existing) if x not in abuse_order]
+
+    df_plot = df_plot[
+        df_plot['dentition_type'].isin(dentition_order) &
+        df_plot['abuse'].isin(abuse_order) &
+        df_plot[y_col].notna()
+    ].copy()
+
+    if df_plot.empty:
+        raise ValueError("No data available for plotting after filtering.")
+
+    # -----------------------------
+    # 3) x positions
+    # -----------------------------
+    n_abuse = len(abuse_order)
+    group_gap = 1.5   # gap between dentition groups
+
+    x_pos_map = {}
+    x_positions = []
+    x_labels = []
+    group_centers = {}
+
+    current_x = 0
+    for dent in dentition_order:
+        start_x = current_x
+        group_positions = []
+
+        for abuse in abuse_order:
+            x_pos_map[(dent, abuse)] = current_x
+            x_positions.append(current_x)
+            x_labels.append(abuse.replace(' Abuse', ''))
+            group_positions.append(current_x)
+            current_x += 1
+
+        group_centers[dent] = np.mean(group_positions)
+        current_x += group_gap
+
+    # -----------------------------
+    # 4) collect data for boxplot
+    # -----------------------------
+    data_for_plot = []
+    positions_for_plot = []
+
+    for dent in dentition_order:
+        for abuse in abuse_order:
+            subset = df_plot.loc[
+                (df_plot['dentition_type'] == dent) &
+                (df_plot['abuse'] == abuse), y_col
+            ].dropna()
+
+            if len(subset) > 0:
+                data_for_plot.append(subset.values)
+                positions_for_plot.append(x_pos_map[(dent, abuse)])
+
+    # -----------------------------
+    # 5) figure
+    # -----------------------------
+    fig, ax = plt.subplots(figsize=figsize)
+
+    bp = ax.boxplot(
+        data_for_plot,
+        positions=positions_for_plot,
+        widths=0.65,
+        patch_artist=True,
+        showfliers=False,
+        medianprops=dict(linewidth=1.5),
+        boxprops=dict(linewidth=1.2),
+        whiskerprops=dict(linewidth=1.1),
+        capprops=dict(linewidth=1.1),
+    )
+
+    # grayscale-like fill styles using alpha
+    face_alphas = [0.25, 0.40, 0.55, 0.70]
+    for i, patch in enumerate(bp['boxes']):
+        patch.set_facecolor('lightgray')
+        patch.set_alpha(face_alphas[i % len(face_alphas)])
+        patch.set_edgecolor('black')
+
+    for median in bp['medians']:
+        median.set_color('black')
+
+    # -----------------------------
+    # 6) jittered points
+    # -----------------------------
+    if show_points:
+        rng = np.random.default_rng(42)
+        for dent in dentition_order:
+            for abuse in abuse_order:
+                subset = df_plot.loc[
+                    (df_plot['dentition_type'] == dent) &
+                    (df_plot['abuse'] == abuse), y_col
+                ].dropna()
+
+                if len(subset) == 0:
+                    continue
+
+                x0 = x_pos_map[(dent, abuse)]
+                jitter = rng.uniform(-0.18, 0.18, size=len(subset))
+                ax.scatter(
+                    np.full(len(subset), x0) + jitter,
+                    subset.values,
+                    alpha=0.5,
+                    s=18,
+                    edgecolors='none'
+                )
+
+    # -----------------------------
+    # 7) vertical separators between dentition groups
+    # -----------------------------
+    for i in range(len(dentition_order) - 1):
+        last_x_this_group = x_pos_map[(dentition_order[i], abuse_order[-1])]
+        first_x_next_group = x_pos_map[(dentition_order[i + 1], abuse_order[0])]
+        sep_x = (last_x_this_group + first_x_next_group) / 2
+        ax.axvline(sep_x, linestyle='--', linewidth=1)
+
+    # -----------------------------
+    # 8) dentition group labels
+    # -----------------------------
+    y_min = df_plot[y_col].min()
+    y_max = df_plot[y_col].max()
+    y_range = y_max - y_min if y_max > y_min else 1
+
+    for dent, center in group_centers.items():
+        label = dent.replace('_', ' ').replace('dentition', 'dentition')
+        ax.text(
+            center,
+            y_max + y_range * 0.18,
+            label,
+            ha='center',
+            va='bottom',
+            fontsize=12,
+            fontweight='bold'
+        )
+
+    # -----------------------------
+    # 9) basic formatting
+    # -----------------------------
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(x_labels, rotation=30, ha='right')
+    ax.set_ylabel(y_col)
+    ax.set_title(f'{y_col} by Dentition Period and Abuse Type')
+    ax.grid(axis='y', linestyle=':', alpha=0.5)
+
+    # -----------------------------
+    # 10) helper for significance lines
+    # -----------------------------
+    def p_to_star(p):
+        if p < 0.001:
+            return '***'
+        elif p < 0.01:
+            return '**'
+        elif p < 0.05:
+            return '*'
+        return 'ns'
+
+    def add_sig_bracket(ax, x1, x2, y, h, text):
+        ax.plot([x1, x1, x2, x2], [y, y + h, y + h, y], linewidth=1.2, c='black')
+        ax.text((x1 + x2) / 2, y + h, text, ha='center', va='bottom', fontsize=10)
+
+    # -----------------------------
+    # 11) within dentition: abuse subtype significance
+    # -----------------------------
+    current_top = y_max + y_range * 0.05
+    bracket_h = y_range * 0.03
+    level_step = y_range * 0.08
+
+    if show_within_dentition_sig and within_dentition_posthoc is not None and not within_dentition_posthoc.empty:
+        sig_df = within_dentition_posthoc.copy()
+
+        # convert p column to numeric
+        sig_df['p_adj_num'] = pd.to_numeric(
+            sig_df['p-value (adjusted)'].replace('<0.0001', '0.0001'),
+            errors='coerce'
+        )
+
+        sig_df = sig_df[sig_df['p_adj_num'] < 0.05].copy()
+
+        for dent in dentition_order:
+            tmp = sig_df[sig_df['Dentition_Type'] == dent].copy()
+            if tmp.empty:
+                continue
+
+            tmp = tmp.sort_values('p_adj_num')
+            local_level = 0
+
+            for _, row in tmp.iterrows():
+                g1 = row['Group1']
+                g2 = row['Group2']
+                if (dent, g1) not in x_pos_map or (dent, g2) not in x_pos_map:
+                    continue
+
+                x1 = x_pos_map[(dent, g1)]
+                x2 = x_pos_map[(dent, g2)]
+                p = row['p_adj_num']
+                stars = p_to_star(p)
+
+                y = current_top + local_level * level_step
+                add_sig_bracket(ax, x1, x2, y, bracket_h, stars)
+                local_level += 1
+
+            current_top += max(local_level, 1) * level_step
+
+    # -----------------------------
+    # 12) optional: within abuse subtype, dentition comparison
+    # -----------------------------
+    if show_within_abuse_sig and within_abuse_posthoc is not None and not within_abuse_posthoc.empty:
+        sig2 = within_abuse_posthoc.copy()
+        sig2['p_adj_num'] = pd.to_numeric(
+            sig2['p-value (adjusted)'].replace('<0.0001', '0.0001'),
+            errors='coerce'
+        )
+        sig2 = sig2[sig2['p_adj_num'] < 0.05].copy()
+
+        for abuse in abuse_order:
+            tmp = sig2[sig2['Abuse_Type'] == abuse].copy()
+            if tmp.empty:
+                continue
+
+            tmp = tmp.sort_values('p_adj_num')
+            local_level = 0
+
+            for _, row in tmp.iterrows():
+                d1 = row['Group1']
+                d2 = row['Group2']
+                if (d1, abuse) not in x_pos_map or (d2, abuse) not in x_pos_map:
+                    continue
+
+                x1 = x_pos_map[(d1, abuse)]
+                x2 = x_pos_map[(d2, abuse)]
+                p = row['p_adj_num']
+                stars = p_to_star(p)
+
+                y = current_top + local_level * level_step
+                add_sig_bracket(ax, x1, x2, y, bracket_h, stars)
+                local_level += 1
+
+            current_top += max(local_level, 1) * level_step
+
+    # -----------------------------
+    # 13) adjust ylim
+    # -----------------------------
+    ax.set_ylim(y_min - y_range * 0.05, current_top + y_range * 0.12)
+
+    # -----------------------------
+    # 14) optional legend
+    # -----------------------------
+    legend_handles = [
+        Line2D([0], [0], color='black', lw=1.2, label='Boxplot'),
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', markersize=6, alpha=0.6, label='Individual observations')
+    ]
+    ax.legend(handles=legend_handles, frameon=False, loc='upper left')
+
+    plt.tight_layout()
+
+    if save_path is not None:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    plt.show()
 
 def pairwise_mannwhitney(df, var_name, group_col='abuse', p_adjust='bonferroni'):
     # ... (Implementation similar to original) ...

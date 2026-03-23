@@ -392,9 +392,28 @@ def main():
         table5_5.to_csv(os.path.join(OUTPUT_DIR, f'table5_5_caries_prevalence_treatment_{timestamp}.csv'), index=False)
 
     # Table 6
-    table6 = create_table6_dmft_by_dentition_abuse(df)
-    if not table6.empty:
-        table6.to_csv(os.path.join(OUTPUT_DIR, f'table6_dmft_dentition_abuse_{timestamp}.csv'), index=False)
+    t6_summary, t6_within_dentition, t6_within_abuse, t6_overall_dentition = create_table6_dmft_by_dentition_abuse(df)
+    if not t6_summary.empty:
+        t6_summary.to_csv(os.path.join(OUTPUT_DIR, f'table6_dmft_dentition_abuse_{timestamp}.csv'), index=False)
+    if not t6_within_dentition.empty:
+        t6_within_dentition.to_csv(os.path.join(OUTPUT_DIR, f'table6_within_dentition_posthoc_{timestamp}.csv'), index=False)
+    if not t6_within_abuse.empty:
+        t6_within_abuse.to_csv(os.path.join(OUTPUT_DIR, f'table6_within_abuse_posthoc_{timestamp}.csv'), index=False)
+    if not t6_overall_dentition.empty:
+        t6_overall_dentition.to_csv(os.path.join(OUTPUT_DIR, f'table6_overall_dentition_posthoc_{timestamp}.csv'), index=False)
+    
+    # figure from table 6
+    plot_dmft_by_dentition_abuse(
+        df=df,
+        within_dentition_posthoc=within_dentition_posthoc,
+        within_abuse_posthoc=within_abuse_posthoc,
+        y_col='DMFT_Index',
+        show_points=True,
+        show_within_dentition_sig=True,   # 每个 dentition 内 abuse 间显著性
+        show_within_abuse_sig=False,      # 先不画 abuse 内 dentition 间显著性，避免太乱
+        figsize=(18, 9),
+        save_path=os.path.join(OUTPUT_DIR, f'figure_dmft_dentition_abuse_{timestamp}.png')
+    )
 
     # Table 7 (year x abuse)
     table7 = create_table_dmft_by_year_abuse(df)
