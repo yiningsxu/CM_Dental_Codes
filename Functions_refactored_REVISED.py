@@ -363,7 +363,11 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
         if is_sig != 'Yes':
             continue
 
-        df_var = _df_for_var(df, var).dropna(subset=[var, 'abuse'])
+        df_var = _df_for_var(df, var).dropna(subset=[var, 'abuse']).copy()
+
+        # 计算 rank，用于 mean rank
+        df_var['_rank'] = df_var[var].rank(method='average')
+        mean_ranks = df_var.groupby('abuse', observed=False)['_rank'].mean().to_dict()
 
         try:
             dunn_adj = posthoc_dunn(df_var, val_col=var, group_col='abuse', p_adjust='bonferroni')
@@ -384,6 +388,13 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                         g1_n = len(group1_vals)
                         g2_n = len(group2_vals)
 
+                        # 描述统计：mean, SD, median, IQR
+                        g1_mean = group1_vals.mean() if g1_n > 0 else np.nan
+                        g2_mean = group2_vals.mean() if g2_n > 0 else np.nan
+
+                        g1_sd = group1_vals.std(ddof=1) if g1_n > 1 else np.nan
+                        g2_sd = group2_vals.std(ddof=1) if g2_n > 1 else np.nan
+
                         g1_median = group1_vals.median() if g1_n > 0 else np.nan
                         g2_median = group2_vals.median() if g2_n > 0 else np.nan
 
@@ -392,6 +403,10 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                         g2_q1 = group2_vals.quantile(0.25) if g2_n > 0 else np.nan
                         g2_q3 = group2_vals.quantile(0.75) if g2_n > 0 else np.nan
 
+                        # Mean rank
+                        g1_mean_rank = mean_ranks.get(abuse1, np.nan)
+                        g2_mean_rank = mean_ranks.get(abuse2, np.nan)
+
                         posthoc_results.append({
                             'Variable': var,
                             'Group1': abuse1,
@@ -399,12 +414,20 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                             'Comparison': f"{abuse1} vs {abuse2}",
                             'Group1_n': g1_n,
                             'Group2_n': g2_n,
-                            # 'Group1_Values': group1_vals.tolist(),
-                            # 'Group2_Values': group2_vals.tolist(),
+
+                            'Group1_Mean': round(g1_mean, 2) if pd.notna(g1_mean) else np.nan,
+                            'Group2_Mean': round(g2_mean, 2) if pd.notna(g2_mean) else np.nan,
+                            'Group1_SD': round(g1_sd, 2) if pd.notna(g1_sd) else np.nan,
+                            'Group2_SD': round(g2_sd, 2) if pd.notna(g2_sd) else np.nan,
+
                             'Group1_Median': round(g1_median, 2) if pd.notna(g1_median) else np.nan,
                             'Group2_Median': round(g2_median, 2) if pd.notna(g2_median) else np.nan,
                             'Group1_IQR': f"{g1_q1:.2f}-{g1_q3:.2f}" if pd.notna(g1_q1) and pd.notna(g1_q3) else np.nan,
                             'Group2_IQR': f"{g2_q1:.2f}-{g2_q3:.2f}" if pd.notna(g2_q1) and pd.notna(g2_q3) else np.nan,
+
+                            'Group1_Mean_Rank': round(g1_mean_rank, 2) if pd.notna(g1_mean_rank) else np.nan,
+                            'Group2_Mean_Rank': round(g2_mean_rank, 2) if pd.notna(g2_mean_rank) else np.nan,
+
                             'p-value (unadjusted)': f"{p_unadj:.4f}" if p_unadj >= 0.0001 else "<0.0001",
                             'p-value (adjusted)': f"{p_adj:.4f}" if p_adj >= 0.0001 else "<0.0001",
                             'Significant': 'Yes' if p_adj < 0.05 else 'No'
@@ -416,12 +439,22 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                             'group2': abuse2,
                             'group1_n': g1_n,
                             'group2_n': g2_n,
+
+                            'group1_mean': g1_mean,
+                            'group2_mean': g2_mean,
+                            'group1_sd': g1_sd,
+                            'group2_sd': g2_sd,
+
                             'group1_median': g1_median,
                             'group2_median': g2_median,
                             'group1_q1': g1_q1,
                             'group1_q3': g1_q3,
                             'group2_q1': g2_q1,
                             'group2_q3': g2_q3,
+
+                            'group1_mean_rank': g1_mean_rank,
+                            'group2_mean_rank': g2_mean_rank,
+
                             'p_unadjusted': p_unadj,
                             'p_adjusted': p_adj,
                             'significant': p_adj < 0.05,
