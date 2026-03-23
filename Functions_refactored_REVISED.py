@@ -366,18 +366,46 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
         df_var = _df_for_var(df, var).dropna(subset=[var, 'abuse'])
 
         try:
-            dunn_adj = sp.posthoc_dunn(df_var, val_col=var, group_col='abuse', p_adjust='bonferroni')
-            dunn_unadj = sp.posthoc_dunn(df_var, val_col=var, group_col='abuse', p_adjust=None)
+            dunn_adj = posthoc_dunn(df_var, val_col=var, group_col='abuse', p_adjust='bonferroni')
+            dunn_unadj = posthoc_dunn(df_var, val_col=var, group_col='abuse', p_adjust=None)
 
             for i, abuse1 in enumerate(abuse_types):
                 for abuse2 in abuse_types[i+1:]:
-                    if abuse1 in dunn_adj.index and abuse2 in dunn_adj.columns:
+                    if (
+                        abuse1 in dunn_adj.index and abuse2 in dunn_adj.columns and
+                        abuse1 in dunn_unadj.index and abuse2 in dunn_unadj.columns
+                    ):
                         p_adj = float(dunn_adj.loc[abuse1, abuse2])
                         p_unadj = float(dunn_unadj.loc[abuse1, abuse2])
 
+                        group1_vals = df_var[df_var['abuse'] == abuse1][var].dropna()
+                        group2_vals = df_var[df_var['abuse'] == abuse2][var].dropna()
+
+                        g1_n = len(group1_vals)
+                        g2_n = len(group2_vals)
+
+                        g1_median = group1_vals.median() if g1_n > 0 else np.nan
+                        g2_median = group2_vals.median() if g2_n > 0 else np.nan
+
+                        g1_q1 = group1_vals.quantile(0.25) if g1_n > 0 else np.nan
+                        g1_q3 = group1_vals.quantile(0.75) if g1_n > 0 else np.nan
+                        g2_q1 = group2_vals.quantile(0.25) if g2_n > 0 else np.nan
+                        g2_q3 = group2_vals.quantile(0.75) if g2_n > 0 else np.nan
+
                         posthoc_results.append({
                             'Variable': var,
+                            'Group1': abuse1,
+                            'Group2': abuse2,
                             'Comparison': f"{abuse1} vs {abuse2}",
+                            'Group1_n': g1_n,
+                            'Group2_n': g2_n,
+                            # 'Group1_Values': group1_vals.tolist(),
+                            # 'Group2_Values': group2_vals.tolist(),
+                            'Group1_Median': round(g1_median, 2) if pd.notna(g1_median) else np.nan,
+                            'Group2_Median': round(g2_median, 2) if pd.notna(g2_median) else np.nan,
+                            'Group1_IQR': f"{g1_q1:.2f}-{g1_q3:.2f}" if pd.notna(g1_q1) and pd.notna(g1_q3) else np.nan,
+                            'Group2_IQR': f"{g2_q1:.2f}-{g2_q3:.2f}" if pd.notna(g2_q1) and pd.notna(g2_q3) else np.nan,
+                            'p-value (unadjusted)': f"{p_unadj:.4f}" if p_unadj >= 0.0001 else "<0.0001",
                             'p-value (adjusted)': f"{p_adj:.4f}" if p_adj >= 0.0001 else "<0.0001",
                             'Significant': 'Yes' if p_adj < 0.05 else 'No'
                         })
@@ -386,11 +414,20 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                             'variable': var,
                             'group1': abuse1,
                             'group2': abuse2,
+                            'group1_n': g1_n,
+                            'group2_n': g2_n,
+                            'group1_median': g1_median,
+                            'group2_median': g2_median,
+                            'group1_q1': g1_q1,
+                            'group1_q3': g1_q3,
+                            'group2_q1': g2_q1,
+                            'group2_q3': g2_q3,
                             'p_unadjusted': p_unadj,
                             'p_adjusted': p_adj,
                             'significant': p_adj < 0.05,
                             'analysis_type': 'Table 3: Overall'
                         })
+
         except Exception as e:
             print(f"[POSTHOC ERROR] var={var}: {e}")
 
