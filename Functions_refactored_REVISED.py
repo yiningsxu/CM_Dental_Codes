@@ -1528,339 +1528,6 @@ def create_table6_dmft_by_dentition_abuse(df: pd.DataFrame):
 
     return summary_table, within_dentition_posthoc, within_abuse_posthoc, overall_dentition_posthoc
 
-def plot_dmft_by_dentition_abuse(
-    df: pd.DataFrame,
-    within_dentition_posthoc: pd.DataFrame,
-    within_abuse_posthoc: pd.DataFrame = None,
-    y_col: str = 'DMFT_Index',
-    show_points: bool = True,
-    show_within_dentition_sig: bool = True,
-    show_within_abuse_sig: bool = False,
-    figsize=(18, 9),
-    save_path: str = None
-    ):
-    """
-    Plot DMFT_Index by dentition period and abuse subtype.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Original dataframe
-    within_dentition_posthoc : pd.DataFrame
-        Output from create_table6_dmft_by_dentition_abuse()[1]
-    within_abuse_posthoc : pd.DataFrame, optional
-        Output from create_table6_dmft_by_dentition_abuse()[2]
-    y_col : str
-        Outcome variable to plot
-    show_points : bool
-        Whether to overlay individual data points
-    show_within_dentition_sig : bool
-        Whether to annotate significant abuse-subtype pairs within each dentition period
-    show_within_abuse_sig : bool
-        Whether to annotate significant dentition pairs within each abuse subtype
-    figsize : tuple
-        Figure size
-    save_path : str, optional
-        Path to save figure
-    """
-
-    df_plot = df.copy()
-
-    # -----------------------------
-    # 1) create dentition_type if needed
-    # -----------------------------
-    if 'dentition_type' not in df_plot.columns:
-        required = ['Present_Teeth', 'Present_Baby_Teeth', 'Present_Perm_Teeth']
-        missing = [c for c in required if c not in df_plot.columns]
-        if missing:
-            raise ValueError(f"Missing columns for dentition_type creation: {missing}")
-
-        def get_dentition_type(row):
-            present_teeth = row['Present_Teeth'] if pd.notna(row['Present_Teeth']) else 0
-            present_baby = row['Present_Baby_Teeth'] if pd.notna(row['Present_Baby_Teeth']) else 0
-            present_perm = row['Present_Perm_Teeth'] if pd.notna(row['Present_Perm_Teeth']) else 0
-
-            if present_teeth == 0:
-                return 'No_Teeth'
-            elif present_baby == present_teeth and present_perm == 0:
-                return 'primary_dentition'
-            elif present_perm == present_teeth and present_baby == 0:
-                return 'permanent_dentition'
-            else:
-                return 'mixed_dentition'
-
-        df_plot['dentition_type'] = df_plot.apply(get_dentition_type, axis=1)
-
-    # -----------------------------
-    # 2) orders
-    # -----------------------------
-    dentition_order = ['primary_dentition', 'mixed_dentition', 'permanent_dentition']
-
-    if pd.api.types.is_categorical_dtype(df_plot['abuse']):
-        abuse_order = [x for x in df_plot['abuse'].cat.categories if pd.notna(x)]
-    else:
-        preferred_order = ['Physical Abuse', 'Neglect', 'Emotional Abuse', 'Sexual Abuse']
-        existing = df_plot['abuse'].dropna().unique().tolist()
-        abuse_order = [x for x in preferred_order if x in existing]
-        abuse_order += [x for x in sorted(existing) if x not in abuse_order]
-
-    df_plot = df_plot[
-        df_plot['dentition_type'].isin(dentition_order) &
-        df_plot['abuse'].isin(abuse_order) &
-        df_plot[y_col].notna()
-    ].copy()
-
-    if df_plot.empty:
-        raise ValueError("No data available for plotting after filtering.")
-
-    # -----------------------------
-    # 3) x positions
-    # -----------------------------
-    n_abuse = len(abuse_order)
-    group_gap = 1.5   # gap between dentition groups
-
-    x_pos_map = {}
-    x_positions = []
-    x_labels = []
-    group_centers = {}
-
-    current_x = 0
-    for dent in dentition_order:
-        start_x = current_x
-        group_positions = []
-
-        for abuse in abuse_order:
-            x_pos_map[(dent, abuse)] = current_x
-            x_positions.append(current_x)
-            x_labels.append(abuse.replace(' Abuse', ''))
-            group_positions.append(current_x)
-            current_x += 1
-
-        group_centers[dent] = np.mean(group_positions)
-        current_x += group_gap
-
-    # -----------------------------
-    # 4) collect data for boxplot
-    # -----------------------------
-    data_for_plot = []
-    positions_for_plot = []
-
-    for dent in dentition_order:
-        for abuse in abuse_order:
-            subset = df_plot.loc[
-                (df_plot['dentition_type'] == dent) &
-                (df_plot['abuse'] == abuse), y_col
-            ].dropna()
-
-            if len(subset) > 0:
-                data_for_plot.append(subset.values)
-                positions_for_plot.append(x_pos_map[(dent, abuse)])
-
-    # -----------------------------
-    # 5) figure
-    # -----------------------------
-    fig, ax = plt.subplots(figsize=figsize)
-
-    bp = ax.boxplot(
-        data_for_plot,
-        positions=positions_for_plot,
-        widths=0.65,
-        patch_artist=True,
-        showfliers=False,
-        medianprops=dict(linewidth=1.5),
-        boxprops=dict(linewidth=1.2),
-        whiskerprops=dict(linewidth=1.1),
-        capprops=dict(linewidth=1.1),
-    )
-
-    # grayscale-like fill styles using alpha
-    face_alphas = [0.25, 0.40, 0.55, 0.70]
-    for i, patch in enumerate(bp['boxes']):
-        patch.set_facecolor('lightgray')
-        patch.set_alpha(face_alphas[i % len(face_alphas)])
-        patch.set_edgecolor('black')
-
-    for median in bp['medians']:
-        median.set_color('black')
-
-    # -----------------------------
-    # 6) jittered points
-    # -----------------------------
-    if show_points:
-        rng = np.random.default_rng(42)
-        for dent in dentition_order:
-            for abuse in abuse_order:
-                subset = df_plot.loc[
-                    (df_plot['dentition_type'] == dent) &
-                    (df_plot['abuse'] == abuse), y_col
-                ].dropna()
-
-                if len(subset) == 0:
-                    continue
-
-                x0 = x_pos_map[(dent, abuse)]
-                jitter = rng.uniform(-0.18, 0.18, size=len(subset))
-                ax.scatter(
-                    np.full(len(subset), x0) + jitter,
-                    subset.values,
-                    alpha=0.5,
-                    s=18,
-                    edgecolors='none'
-                )
-
-    # -----------------------------
-    # 7) vertical separators between dentition groups
-    # -----------------------------
-    for i in range(len(dentition_order) - 1):
-        last_x_this_group = x_pos_map[(dentition_order[i], abuse_order[-1])]
-        first_x_next_group = x_pos_map[(dentition_order[i + 1], abuse_order[0])]
-        sep_x = (last_x_this_group + first_x_next_group) / 2
-        ax.axvline(sep_x, linestyle='--', linewidth=1)
-
-    # -----------------------------
-    # 8) dentition group labels
-    # -----------------------------
-    y_min = df_plot[y_col].min()
-    y_max = df_plot[y_col].max()
-    y_range = y_max - y_min if y_max > y_min else 1
-
-    for dent, center in group_centers.items():
-        label = dent.replace('_', ' ').replace('dentition', 'dentition')
-        ax.text(
-            center,
-            y_max + y_range * 0.18,
-            label,
-            ha='center',
-            va='bottom',
-            fontsize=12,
-            fontweight='bold'
-        )
-
-    # -----------------------------
-    # 9) basic formatting
-    # -----------------------------
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels(x_labels, rotation=30, ha='right')
-    ax.set_ylabel(y_col)
-    ax.set_title(f'{y_col} by Dentition Period and Abuse Type')
-    ax.grid(axis='y', linestyle=':', alpha=0.5)
-
-    # -----------------------------
-    # 10) helper for significance lines
-    # -----------------------------
-    def p_to_star(p):
-        if p < 0.001:
-            return '***'
-        elif p < 0.01:
-            return '**'
-        elif p < 0.05:
-            return '*'
-        return 'ns'
-
-    def add_sig_bracket(ax, x1, x2, y, h, text):
-        ax.plot([x1, x1, x2, x2], [y, y + h, y + h, y], linewidth=1.2, c='black')
-        ax.text((x1 + x2) / 2, y + h, text, ha='center', va='bottom', fontsize=10)
-
-    # -----------------------------
-    # 11) within dentition: abuse subtype significance
-    # -----------------------------
-    current_top = y_max + y_range * 0.05
-    bracket_h = y_range * 0.03
-    level_step = y_range * 0.08
-
-    if show_within_dentition_sig and within_dentition_posthoc is not None and not within_dentition_posthoc.empty:
-        sig_df = within_dentition_posthoc.copy()
-
-        # convert p column to numeric
-        sig_df['p_adj_num'] = pd.to_numeric(
-            sig_df['p-value (adjusted)'].replace('<0.0001', '0.0001'),
-            errors='coerce'
-        )
-
-        sig_df = sig_df[sig_df['p_adj_num'] < 0.05].copy()
-
-        for dent in dentition_order:
-            tmp = sig_df[sig_df['Dentition_Type'] == dent].copy()
-            if tmp.empty:
-                continue
-
-            tmp = tmp.sort_values('p_adj_num')
-            local_level = 0
-
-            for _, row in tmp.iterrows():
-                g1 = row['Group1']
-                g2 = row['Group2']
-                if (dent, g1) not in x_pos_map or (dent, g2) not in x_pos_map:
-                    continue
-
-                x1 = x_pos_map[(dent, g1)]
-                x2 = x_pos_map[(dent, g2)]
-                p = row['p_adj_num']
-                stars = p_to_star(p)
-
-                y = current_top + local_level * level_step
-                add_sig_bracket(ax, x1, x2, y, bracket_h, stars)
-                local_level += 1
-
-            current_top += max(local_level, 1) * level_step
-
-    # -----------------------------
-    # 12) optional: within abuse subtype, dentition comparison
-    # -----------------------------
-    if show_within_abuse_sig and within_abuse_posthoc is not None and not within_abuse_posthoc.empty:
-        sig2 = within_abuse_posthoc.copy()
-        sig2['p_adj_num'] = pd.to_numeric(
-            sig2['p-value (adjusted)'].replace('<0.0001', '0.0001'),
-            errors='coerce'
-        )
-        sig2 = sig2[sig2['p_adj_num'] < 0.05].copy()
-
-        for abuse in abuse_order:
-            tmp = sig2[sig2['Abuse_Type'] == abuse].copy()
-            if tmp.empty:
-                continue
-
-            tmp = tmp.sort_values('p_adj_num')
-            local_level = 0
-
-            for _, row in tmp.iterrows():
-                d1 = row['Group1']
-                d2 = row['Group2']
-                if (d1, abuse) not in x_pos_map or (d2, abuse) not in x_pos_map:
-                    continue
-
-                x1 = x_pos_map[(d1, abuse)]
-                x2 = x_pos_map[(d2, abuse)]
-                p = row['p_adj_num']
-                stars = p_to_star(p)
-
-                y = current_top + local_level * level_step
-                add_sig_bracket(ax, x1, x2, y, bracket_h, stars)
-                local_level += 1
-
-            current_top += max(local_level, 1) * level_step
-
-    # -----------------------------
-    # 13) adjust ylim
-    # -----------------------------
-    ax.set_ylim(y_min - y_range * 0.05, current_top + y_range * 0.12)
-
-    # -----------------------------
-    # 14) optional legend
-    # -----------------------------
-    legend_handles = [
-        Line2D([0], [0], color='black', lw=1.2, label='Boxplot'),
-        Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', markersize=6, alpha=0.6, label='Individual observations')
-    ]
-    ax.legend(handles=legend_handles, frameon=False, loc='upper left')
-
-    plt.tight_layout()
-
-    if save_path is not None:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-
-    plt.show()
-
 def p_to_star(p_val):
     """将p值转换为星号"""
     if str(p_val).startswith('<'):
@@ -1872,7 +1539,7 @@ def p_to_star(p_val):
     if p < 0.05: return '*'
     return ''
 
-def plot_overall_dentition_refined(df, posthoc_df, y_col='DMFT_Index', ylabel=None, save_path=None):
+def plot_overall_dentition_refined(df, posthoc_df, y_col='DMFT_Index', xlabel=None, ylabel=None, title=None, title_fontsize=14, label_fontsize=14, tick_fontsize=12, save_path=None):
     """图1：整体牙列分期对比"""
     dentition_order = ['primary_dentition', 'mixed_dentition', 'permanent_dentition']
     df_plot = df[df['dentition_type'].isin(dentition_order)].copy()
@@ -1919,21 +1586,25 @@ def plot_overall_dentition_refined(df, posthoc_df, y_col='DMFT_Index', ylabel=No
             stars = p_to_star(row['p-value (adjusted)'])
             
             ax.plot([x1, x1, x2, x2], [h, h + step*0.2, h + step*0.2, h], lw=1.2, c='black')
-            ax.text((x1+x2)/2, h + step*0.2, stars, ha='center', va='bottom', fontsize=12)
+            ax.text((x1+x2)/2, h + step*0.2, stars, ha='center', va='bottom', fontsize=tick_fontsize)
         
         ax.set_ylim(top=y_ref + (len(sig_results)+1) * step)
 
     ax.set_xticks(positions)
     xtick_labels = [f"{d.replace('_', ' ').title()}\n(n={len(data)})" for d, data in zip(dentition_order, plot_data)]
-    ax.set_xticklabels(xtick_labels, fontsize=14, fontweight='bold')
-    ax.set_ylabel(ylabel, fontsize=14, fontweight='bold')
-    ax.set_title(f'Overall {ylabel} by Dentition Period', fontsize=14, pad=20)
+    ax.set_xticklabels(xtick_labels, fontsize=tick_fontsize, fontweight='bold')
+    
+    if xlabel: ax.set_xlabel(xlabel, fontsize=label_fontsize, fontweight='bold')
+    if ylabel: ax.set_ylabel(ylabel, fontsize=label_fontsize, fontweight='bold')
+    
+    plot_title = title if title else f'Overall {ylabel or y_col} by Dentition Period'
+    ax.set_title(plot_title, fontsize=title_fontsize, pad=20)
     
     plt.tight_layout()
     if save_path: plt.savefig(save_path, dpi=300, bbox_inches='tight')
     # plt.show()
 
-def plot_abuse_by_dentition_facet_refined(df, posthoc_df, y_col='DMFT_Index', ylabel=None, save_path=None):
+def plot_abuse_by_dentition_facet_refined(df, posthoc_df, y_col='DMFT_Index', xlabel=None, ylabel=None, title=None, title_fontsize=16, label_fontsize=14, tick_fontsize=12, save_path=None):
     """图2：分牙列周期的受虐类型对比 (三并列)"""
     dentition_order = ['primary_dentition', 'mixed_dentition', 'permanent_dentition']
     # 确保虐待类型顺序一致
@@ -1960,7 +1631,7 @@ def plot_abuse_by_dentition_facet_refined(df, posthoc_df, y_col='DMFT_Index', yl
                 xtick_labels.append(f"{short_name}\n(n={len(subset)})")
         
         if not plot_data: 
-            ax.set_title(f"{dent}\n(No Data)")
+            ax.set_title(f"{dent}\n(No Data)", fontsize=title_fontsize)
             continue
             
         # 1. 箱线图
@@ -1996,90 +1667,28 @@ def plot_abuse_by_dentition_facet_refined(df, posthoc_df, y_col='DMFT_Index', yl
                         stars = p_to_star(row['p-value (adjusted)'])
                         
                         ax.plot([x1, x1, x2, x2], [h, h + step*0.2, h + step*0.2, h], lw=1, c='black')
-                        ax.text((x1+x2)/2, h + step*0.2, stars, ha='center', va='bottom')
+                        ax.text((x1+x2)/2, h + step*0.2, stars, ha='center', va='bottom', fontsize=tick_fontsize)
                     except ValueError: continue
 
-        ax.set_title(dent.replace('_', ' ').title(), fontsize=16, fontweight='bold', pad=15)
+        ax.set_title(dent.replace('_', ' ').title(), fontsize=title_fontsize, fontweight='bold', pad=15)
         ax.set_xticks(positions)
-        ax.set_xticklabels(xtick_labels, rotation=0,fontsize=14, fontweight='bold')
-        if i == 0: ax.set_ylabel(ylabel, fontsize=14, fontweight='bold')
+        ax.set_xticklabels(xtick_labels, rotation=0, fontsize=tick_fontsize, fontweight='bold')
+        
+        if xlabel: ax.set_xlabel(xlabel, fontsize=label_fontsize, fontweight='bold')
+        if i == 0 and ylabel: ax.set_ylabel(ylabel, fontsize=label_fontsize, fontweight='bold')
 
-    plt.suptitle(f'Comparison of {ylabel} by Abuse Type across Dentition Stages', fontsize=16, y=1.02)
+    plot_title = title if title else f'Comparison of {ylabel or y_col} by Abuse Type across Dentition Stages'
+    plt.suptitle(plot_title, fontsize=title_fontsize + 2, y=1.02)
     plt.tight_layout()
     if save_path: plt.savefig(save_path, dpi=300, bbox_inches='tight')
     # plt.show()
     
-def pairwise_mannwhitney(df, var_name, group_col='abuse', p_adjust='bonferroni'):
-    # ... (Implementation similar to original) ...
-    if df[group_col].dtype.name == 'category':
-        groups = df[group_col].cat.categories.tolist()
-    else:
-        groups = sorted(df[group_col].dropna().unique())
-        
-    pairs = list(itertools.combinations(groups, 2))
-    n_comparisons = len(pairs)
-    results = []
-    
-    for group1, group2 in pairs:
-        data1 = df[df[group_col] == group1][var_name].dropna()
-        data2 = df[df[group_col] == group2][var_name].dropna()
-        
-        if len(data1) == 0 or len(data2) == 0: continue
-        
-        u_stat, p_val = mannwhitneyu(data1, data2, alternative='two-sided')
-        n1, n2 = len(data1), len(data2)
-        r = 1 - (2 * u_stat) / (n1 * n2)
-        
-        p_adjusted = min(p_val * n_comparisons, 1.0) if p_adjust == 'bonferroni' else p_val
-        
-        sig = ''
-        if p_adjusted <= 0.001: sig = '***'
-        elif p_adjusted <= 0.01: sig = '**'
-        elif p_adjusted <= 0.05: sig = '*'
-        
-        results.append({
-            'Group1': group1, 'Group2': group2,
-            'p-value_raw': f'{p_val:.4f}',
-            'p-value_adjusted': f'{p_adjusted:.4f}',
-            'Significance': sig
-        })
-    return pd.DataFrame(results)
-
-def analyze_dmft_by_dentition_with_pairwise(df):
-    # Simplified wrapper
-    # Logic to create dentition_type is repeated, should be a helper function ideally
-    # but for now we follow the structure
-    df_analysis = df.copy()
-    # ... (Same logic as create_table6 for dentition_type) ...
-    # Placeholder for brevity in this part
-    return pd.DataFrame()
-
 def parse_ci(ci_str):
     import re
     match = re.search(r'\(([\d.]+)-([\d.]+)\)', ci_str)
     if match:
         return float(match.group(1)), float(match.group(2))
     return np.nan, np.nan
-
-def create_forest_plot_vertical(df_logistic, df_original, output_dir, timestamp, figsize=(10, 10)):
-    # ... (Same logic as original, just ensure no side effects) ...
-    # Ensure df_logistic is valid
-    if df_logistic.empty: return
-    pass # Implementation details omitted for brevity in Part 2, assuming mostly display logic
-
-def create_visualizations(df, output_dir):
-    df_plot = df.copy()
-    # ... (Plotting logic) ...
-    pass
-
-def plot_boxplot_with_dunn(df, var_name, group_col='abuse', title=None, output_dir=None, p_adjust='bonferroni', palette='Set2', yaxis_name=None):
-    pass
-
-def plot_boxplot_by_dentition_type(df, output_dir=None, p_adjust='bonferroni', palette='Set2'):
-    pass
-
-def generate_summary_report(df, table3_overall, output_dir, timestamp):
-    pass
 
 def pairwise_mannwhitney(df, var_name, group_col='abuse', p_adjust='bonferroni'):
     if df[group_col].dtype.name == 'category':
@@ -2394,8 +2003,9 @@ def create_visualizations(df, output_dir):
         plt.savefig(f'{output_dir}figure_{var_name}_bar.png', dpi=300)
         plt.close()
 
-def plot_boxplot_with_dunn(df, var_name, group_col='abuse', title=None, output_dir=None, p_adjust='bonferroni', palette='Set2', yaxis_name=None):
+def plot_boxplot_with_dunn(df, var_name, group_col='abuse', xlabel=None, ylabel=None, title=None, title_fontsize=14, label_fontsize=14, tick_fontsize=12, output_dir=None, p_adjust='bonferroni'):
     if output_dir is None: output_dir = './'
+    timestamp = pd.Timestamp.now().strftime('%Y%m%d') # Fallback if not passed globally
     ratio_vars = {'Care_Index', 'UTN_Score'}
     cols = [group_col, var_name]
     if var_name in ratio_vars and 'DMFT_Index' in df.columns:
@@ -2410,14 +2020,30 @@ def plot_boxplot_with_dunn(df, var_name, group_col='abuse', title=None, output_d
         dunn_results = sp.posthoc_dunn(data, val_col=var_name, group_col=group_col, p_adjust=p_adjust)
     except: return
 
-    plt.figure(figsize=(10, 6))
-    ax = sns.boxplot(x=group_col, y=var_name, data=data, order=categories, palette=palette, fill=False, legend=False, linewidth=2, hue=group_col)
-    sns.stripplot(x=group_col, y=var_name, data=data, order=categories, jitter=True, alpha=0.5, size=5, color=".3")
+    fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+    
+    plot_data = [data[data[group_col] == c][var_name].dropna() for c in categories]
+    positions = np.arange(len(categories))
+    
+    # 1. 箱线图
+    ax.boxplot(plot_data, positions=positions, widths=0.5, patch_artist=False,
+               showmeans=True, meanline=True, showfliers=False,
+               meanprops={'color': 'red', 'linestyle': '--', 'linewidth': 1.5},
+               boxprops={'color': 'black'})
+               
+    # 2. 散点和平均值
+    rng = np.random.default_rng(42)
+    y_max_data = data[var_name].max()
+    
+    for i, p_data in enumerate(plot_data):
+        jitter = rng.uniform(-0.15, 0.15, size=len(p_data))
+        ax.scatter(np.full(len(p_data), i) + jitter, p_data, alpha=0.4, s=25, color='gray', edgecolors='none')
+        m_val = p_data.mean()
+        ax.text(i, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontweight='bold')
 
-    y_max = data[var_name].max()
-    y_range = y_max - data[var_name].min()
-    h_step = y_range * 0.1
-    y_start = y_max + (y_range * 0.05)
+    y_range = y_max_data - data[var_name].min()
+    h_step = y_range * 0.1 if y_range > 0 else 1
+    y_start = y_max_data + (h_step * 0.5)
     
     sig_count = 0
     for i, cat1 in enumerate(categories):
@@ -2428,28 +2054,35 @@ def plot_boxplot_with_dunn(df, var_name, group_col='abuse', title=None, output_d
                     if p_val < 0.05:
                         x1, x2 = i, j
                         y = y_start + (sig_count * h_step)
-                        h = y_range * 0.02
-                        plt.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1.5, c='k')
-                        label = '***' if p_val < 0.001 else '**' if p_val < 0.01 else '*'
-                        plt.text((x1+x2)*.5, y+h, label, ha='center', va='bottom', fontsize=10)
+                        h = h_step * 0.2
+                        ax.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1.2, c='black')
+                        stars = '***' if p_val < 0.001 else '**' if p_val < 0.01 else '*'
+                        ax.text((x1+x2)*.5, y+h, stars, ha='center', va='bottom', fontsize=tick_fontsize)
                         sig_count += 1
                 except: pass
     
     if sig_count > 0:
-        plt.ylim(top=y_start + (sig_count * h_step) + h_step)
+        ax.set_ylim(top=y_start + (sig_count * h_step) + h_step)
         
-    plt.title(title if title else f'{var_name} by Abuse Type')
+    ax.set_xticks(positions)
+    xtick_labels = [f"{c.replace('_', ' ').title()}\n(n={len(d)})" for c, d in zip(categories, plot_data)]
+    ax.set_xticklabels(xtick_labels, fontsize=tick_fontsize, fontweight='bold')
+    
+    if xlabel: ax.set_xlabel(xlabel, fontsize=label_fontsize, fontweight='bold')
+    ax.set_ylabel(ylabel if ylabel else var_name, fontsize=label_fontsize, fontweight='bold')
+    
+    plot_title = title if title else f'{ylabel or var_name} by Abuse Type'
+    ax.set_title(plot_title, fontsize=title_fontsize, pad=20)
     plt.tight_layout()
-    plt.savefig(f'{output_dir}pairwise_results_{var_name}_{timestamp}.png', dpi=300)
+    plt.savefig(os.path.join(output_dir, f'pairwise_results_{var_name}_{timestamp}.png'), dpi=300)
     plt.close()
 
-def plot_boxplot_by_dentition_type(df, output_dir=None, p_adjust='bonferroni', palette='Set2'):
+def plot_boxplot_by_dentition_type(df, xlabel=None, ylabel=None, title=None, title_fontsize=14, label_fontsize=14, tick_fontsize=12, output_dir=None, p_adjust='bonferroni'):
     if output_dir is None: output_dir = './'
-    # Required cols
+    timestamp = pd.Timestamp.now().strftime('%Y%m%d')
     df_analysis = df.copy()
     if 'dentition_type' not in df_analysis.columns:
         def get_dentition_type(row):
-            # Simplified logic
             present_teeth = row['total_teeth'] if pd.notna(row['total_teeth']) else 0
             present_baby = row['Baby_total_teeth'] if pd.notna(row['Baby_total_teeth']) else 0
             present_perm = row['Perm_total_teeth'] if pd.notna(row['Perm_total_teeth']) else 0
@@ -2457,26 +2090,71 @@ def plot_boxplot_by_dentition_type(df, output_dir=None, p_adjust='bonferroni', p
             elif present_baby == present_teeth and present_perm == 0: return 'primary_dentition'
             elif present_perm == present_teeth and present_baby == 0: return 'permanent_dentition'
             else: return 'mixed_dentition'
-        
         df_analysis['dentition_type'] = df_analysis.apply(get_dentition_type, axis=1)
         
     dentition_order = ['primary_dentition', 'mixed_dentition', 'permanent_dentition']
     data = df_analysis[df_analysis['dentition_type'].isin(dentition_order)].dropna(subset=['DMFT_Index'])
-    
     if data.empty: return
     
     try:
         dunn_results = sp.posthoc_dunn(data, val_col='DMFT_Index', group_col='dentition_type', p_adjust=p_adjust)
     except: return
     
-    plt.figure(figsize=(12, 8))
-    ax = sns.boxplot(x='dentition_type', y='DMFT_Index', data=data, order=dentition_order, palette=palette, fill=False)
+    fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
     
-    # ... (Sig lines logic similar to above, simplified here for brevity but assuming enough for now) ...
-    # To save tokens, I trust the simplified version is enough for "Improvement" task.
+    plot_data = [data[data['dentition_type'] == d]['DMFT_Index'].dropna() for d in dentition_order]
+    positions = np.arange(len(dentition_order))
     
+    # 1. 箱线图
+    ax.boxplot(plot_data, positions=positions, widths=0.5, patch_artist=False,
+               showmeans=True, meanline=True, showfliers=False,
+               meanprops={'color': 'red', 'linestyle': '--', 'linewidth': 1.5},
+               boxprops={'color': 'black'})
+               
+    # 2. 散点和平均值
+    rng = np.random.default_rng(42)
+    y_max_data = data['DMFT_Index'].max()
+    
+    for i, p_data in enumerate(plot_data):
+        jitter = rng.uniform(-0.15, 0.15, size=len(p_data))
+        ax.scatter(np.full(len(p_data), i) + jitter, p_data, alpha=0.4, s=25, color='gray', edgecolors='none')
+        m_val = p_data.mean()
+        ax.text(i, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontweight='bold')
+
+    y_range = y_max_data - data['DMFT_Index'].min()
+    h_step = y_range * 0.1 if y_range > 0 else 1
+    y_start = y_max_data + (h_step * 0.5)
+    
+    sig_count = 0
+    for i, cat1 in enumerate(dentition_order):
+        for j, cat2 in enumerate(dentition_order):
+            if i < j:
+                try:
+                    p_val = dunn_results.loc[cat1, cat2]
+                    if p_val < 0.05:
+                        x1, x2 = i, j
+                        y = y_start + (sig_count * h_step)
+                        h = h_step * 0.2
+                        ax.plot([x1, x1, x2, x2], [y, y+h, y+h, y], lw=1.2, c='black')
+                        stars = '***' if p_val < 0.001 else '**' if p_val < 0.01 else '*'
+                        ax.text((x1+x2)*.5, y+h, stars, ha='center', va='bottom', fontsize=tick_fontsize)
+                        sig_count += 1
+                except: pass
+    
+    if sig_count > 0:
+        ax.set_ylim(top=y_start + (sig_count * h_step) + h_step)
+        
+    ax.set_xticks(positions)
+    xtick_labels = [f"{d.replace('_', ' ').title()}\n(n={len(pd)})" for d, pd in zip(dentition_order, plot_data)]
+    ax.set_xticklabels(xtick_labels, fontsize=tick_fontsize, fontweight='bold')
+    
+    if xlabel: ax.set_xlabel(xlabel, fontsize=label_fontsize, fontweight='bold')
+    ax.set_ylabel(ylabel if ylabel else 'DMFT Index', fontsize=label_fontsize, fontweight='bold')
+    
+    plot_title = title if title else f'{ylabel or "DMFT Index"} by Dentition Period'
+    ax.set_title(plot_title, fontsize=title_fontsize, pad=20)
     plt.tight_layout()
-    plt.savefig(f'{output_dir}pairwise_results_dentition_type_{timestamp}.png', dpi=300)
+    plt.savefig(os.path.join(output_dir, f'pairwise_results_dentition_type_{timestamp}.png'), dpi=300)
     plt.close()
 
 def generate_summary_report(df, table3_overall, output_dir, timestamp):

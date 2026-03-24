@@ -26,7 +26,6 @@ try:
         create_table5_dmft_by_lifestage_abuse,
         create_table5_5_caries_prevalence_treatment,
         create_table6_dmft_by_dentition_abuse,
-        plot_dmft_by_dentition_abuse,
         plot_overall_dentition_refined,
         plot_abuse_by_dentition_facet_refined,
         analyze_dmft_by_dentition_with_pairwise,
@@ -105,7 +104,7 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
         df['Perm_sound_rate'] = (df['Perm_Sound'] / df['Perm_total_teeth'] * 100).replace([np.inf, -np.inf], np.nan)
     else:
         for col in ['Perm_D', 'Perm_M', 'Perm_F', 'Perm_Sound', 'Perm_DMFT', 'Perm_C0', 'Perm_DMFT_C0', 'Perm_total_teeth', 'Perm_sound_rate']:
-            df[col] = 0
+            df[col] = np.nan
 
     if baby_cols:
         df['Baby_d'] = (df[baby_cols] == 3).sum(axis=1)
@@ -119,7 +118,7 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
         df['Baby_sound_rate'] = (df['Baby_sound'] / df['Baby_total_teeth'] * 100).replace([np.inf, -np.inf], np.nan)
     else:
         for col in ['Baby_d', 'Baby_m', 'Baby_f', 'Baby_sound', 'Baby_DMFT', 'Baby_C0', 'Baby_DMFT_C0', 'Baby_total_teeth', 'Baby_sound_rate']:
-            df[col] = 0
+            df[col] = np.nan
 
     # Total
     df['DMFT_Index'] = df['Perm_DMFT'] + df['Baby_DMFT']
@@ -405,19 +404,6 @@ def main():
     if not t6_overall_dentition.empty:
         t6_overall_dentition.to_csv(os.path.join(OUTPUT_DIR, f'table6_overall_dentition_posthoc_{timestamp}.csv'), index=False)
     
-    # figure from table 6
-    # plot_dmft_by_dentition_abuse(
-    #     df=df,
-    #     within_dentition_posthoc=t6_within_dentition,
-    #     within_abuse_posthoc=t6_within_abuse,
-    #     y_col='DMFT_Index',
-    #     show_points=True,
-    #     show_within_dentition_sig=True,   # 每个 dentition 内 abuse 间显著性
-    #     show_within_abuse_sig=False,      # 先不画 abuse 内 dentition 间显著性，避免太乱
-    #     figsize=(18, 9),
-    #     save_path=os.path.join(OUTPUT_DIR, f'figure_dmft_dentition_abuse_{timestamp}.png')
-    # )
-    
     # --- 生成图 1：整体牙列对比 ---
     # 传入 t6_overall_dentition 进行显著性标注
     plot_overall_dentition_refined(
@@ -447,10 +433,11 @@ def main():
     create_visualizations(df, OUTPUT_DIR)
 
     # Pairwise plots (note: Care_Index plotted among DMFT>0 only in revised function)
-    for var in ['DMFT_Index', 'Baby_DMFT', 'Baby_d', 'Healthy_Rate', 'Care_Index', 'UTN_Score']:
-        if var in df.columns:
-            plot_boxplot_with_dunn(df, var, group_col='abuse', yaxis_name=var, output_dir=OUTPUT_DIR)
-
+    for var in ['DMFT_Index', 'Healthy_Rate', 'Baby_d', 'Baby_DMFT', 'Care_Index', 'UTN_Score']:
+        try:
+            plot_boxplot_with_dunn(df, var, group_col='abuse', ylabel=var, output_dir=OUTPUT_DIR)
+        except Exception as e:
+            print(f"Error drawing pairwise plot for {var}: {e}")
     plot_boxplot_by_dentition_type(df, output_dir=OUTPUT_DIR)
 
     # Summary report
