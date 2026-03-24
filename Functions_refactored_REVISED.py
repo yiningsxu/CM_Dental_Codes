@@ -424,13 +424,13 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                         )
 
                         g1_median_iqr_str = (
-                            f"{g1_median:.2f} [{g1_q1:.2f}-{g1_q3:.2f}]"
+                            f"{g1_median:.1f} [{g1_q1:.1f}-{g1_q3:.1f}]"
                             if pd.notna(g1_median) and pd.notna(g1_q1) and pd.notna(g1_q3)
                             else np.nan
                         )
 
                         g2_median_iqr_str = (
-                            f"{g2_median:.2f} [{g2_q1:.2f}-{g2_q3:.2f}]"
+                            f"{g2_median:.1f} [{g2_q1:.1f}-{g2_q3:.1f}]"
                             if pd.notna(g2_median) and pd.notna(g2_q1) and pd.notna(g2_q3)
                             else np.nan
                         )
@@ -450,8 +450,8 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
 
                             'Group1_Median': round(g1_median, 2) if pd.notna(g1_median) else np.nan,
                             'Group2_Median': round(g2_median, 2) if pd.notna(g2_median) else np.nan,
-                            'Group1_IQR': f"{g1_q1:.2f}-{g1_q3:.2f}" if pd.notna(g1_q1) and pd.notna(g1_q3) else np.nan,
-                            'Group2_IQR': f"{g2_q1:.2f}-{g2_q3:.2f}" if pd.notna(g2_q1) and pd.notna(g2_q3) else np.nan,
+                            'Group1_IQR': f"{g1_q1:.1f}-{g1_q3:.1f}" if pd.notna(g1_q1) and pd.notna(g1_q3) else np.nan,
+                            'Group2_IQR': f"{g2_q1:.1f}-{g2_q3:.1f}" if pd.notna(g2_q1) and pd.notna(g2_q3) else np.nan,
 
                             'Group1_Mean_SD': g1_mean_sd_str,
                             'Group2_Mean_SD': g2_mean_sd_str,
@@ -527,8 +527,8 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                     'Variable': var,
                     'Group1': abuse1,
                     'Group2': abuse2,
-                    'Group1_Median': f"{group1.median():.2f}",
-                    'Group2_Median': f"{group2.median():.2f}",
+                    'Group1_Median': f"{group1.median():.1f}",
+                    'Group2_Median': f"{group2.median():.1f}",
                     'U_Statistic': f"{u_stat:.0f}",
                     'p-value': f"{p_val:.4f}" if p_val >= 0.0001 else "<0.0001",
                     'Effect_Size_r': f"{r:.3f}",
@@ -1060,18 +1060,23 @@ def create_table5_5_caries_prevalence_treatment(df: pd.DataFrame):
     results.append(row_fully_treated)
     
     # No filled teeth
-    row_no_filled = {'Variable': 'No Filled Teeth', 'Category': 'DMFT_Index > 0 and f+F = 0'}
+    row_no_filled = {'Variable': 'No Filled Teeth', 'Category': 'f+F = 0 (Among Caries Active)'}
+    
+    # 使用已经过滤好的 df_with_caries
     for abuse in abuse_types:
-        subset = df_local[df_local['abuse'] == abuse]
-        n_total = len(subset)
-        n_no_filled = ((subset['DMFT_Index'] > 0) & (subset['filled_total'] == 0)).sum()
+        subset = df_with_caries[df_with_caries['abuse'] == abuse]
+        n_total = len(subset) # 现在分母是该组中 DMFT > 0 的人数
+        
+        # 因为已经是 df_with_caries，所以只需要判断 filled_total == 0
+        n_no_filled = (subset['filled_total'] == 0).sum()
         pct = (n_no_filled / n_total * 100) if n_total > 0 else 0
         row_no_filled[abuse] = f"{n_no_filled}/{n_total} ({pct:.1f}%)"
     
-    n_total_all = len(df_local)
-    n_no_filled_all = ((df_local['DMFT_Index'] > 0) & (df_local['filled_total'] == 0)).sum()
-    pct_no_filled = (n_no_filled_all / n_total_all * 100) if n_total_all > 0 else 0
-    row_no_filled['Total'] = f"{n_no_filled_all}/{n_total_all} ({pct_no_filled:.1f}%)"
+    # Total 部分同理
+    n_total_caries = len(df_with_caries)
+    n_no_filled_all = (df_with_caries['filled_total'] == 0).sum()
+    pct_no_filled = (n_no_filled_all / n_total_caries * 100) if n_total_caries > 0 else 0
+    row_no_filled['Total'] = f"{n_no_filled_all}/{n_total_caries} ({pct_no_filled:.1f}%)"
     
     df_local['has_no_filled'] = ((df_local['DMFT_Index'] > 0) & (df_local['filled_total'] == 0)).astype(int)
     try:
@@ -1631,7 +1636,7 @@ def plot_overall_dentition_refined(df, posthoc_df, y_col='DMFT_Index', xlabel=No
     if ylabel: ax.set_ylabel(ylabel, fontsize=label_fontsize, fontweight='bold')
     
     plot_title = title if title else f'Overall {ylabel or y_col} by Dentition Period'
-    ax.set_title(plot_title, fontsize=title_fontsize, pad=20)
+    # ax.set_title(plot_title, fontsize=title_fontsize, pad=20)
     
     plt.tight_layout()
     if save_path: plt.savefig(save_path, dpi=300, bbox_inches='tight')
@@ -1664,7 +1669,7 @@ def plot_abuse_by_dentition_facet_refined(df, posthoc_df, y_col='DMFT_Index', xl
                 xtick_labels.append(f"{short_name}\n(n={len(subset)})")
         
         if not plot_data: 
-            ax.set_title(f"{dent}\n(No Data)", fontsize=title_fontsize)
+            # ax.set_title(f"{dent}\n(No Data)", fontsize=title_fontsize)
             continue
             
         # 1. 箱线图
@@ -1704,7 +1709,7 @@ def plot_abuse_by_dentition_facet_refined(df, posthoc_df, y_col='DMFT_Index', xl
                         ax.text((x1+x2)/2, h + step*0.2, stars, ha='center', va='bottom', fontsize=tick_fontsize)
                     except ValueError: continue
 
-        ax.set_title(dent.replace('_', ' ').title(), fontsize=title_fontsize, fontweight='bold', pad=15)
+        # ax.set_title(dent.replace('_', ' ').title(), fontsize=title_fontsize, fontweight='bold', pad=15)
         ax.set_xticks(positions)
         ax.set_xticklabels(xtick_labels, rotation=0, fontsize=tick_fontsize, fontweight='bold')
         
@@ -1712,7 +1717,7 @@ def plot_abuse_by_dentition_facet_refined(df, posthoc_df, y_col='DMFT_Index', xl
         if i == 0 and ylabel: ax.set_ylabel(ylabel, fontsize=label_fontsize, fontweight='bold')
 
     plot_title = title if title else f'Comparison of {ylabel or y_col} by Abuse Type across Dentition Stages'
-    plt.suptitle(plot_title, fontsize=title_fontsize + 2, y=1.02)
+    # plt.suptitle(plot_title, fontsize=title_fontsize + 2, y=1.02)
     plt.tight_layout()
     if save_path: plt.savefig(save_path, dpi=300, bbox_inches='tight')
     # plt.show()
@@ -2002,7 +2007,7 @@ def create_forest_plot_vertical(df_logistic, df_original, output_dir, timestamp,
     ax.invert_yaxis()
     ax.set_xlabel('Odds Ratio (95% CI)', fontsize=14, fontweight='bold')
     ax.set_xlim(0, 4.5)
-    ax.set_title('Adjusted Odds Ratios by Abuse Type', fontsize=14, fontweight='bold', pad=20)
+    # ax.set_title('Adjusted Odds Ratios by Abuse Type', fontsize=14, fontweight='bold', pad=20)
     plt.tight_layout()
     plt.savefig(f'{output_dir}figure_forest_plot_{timestamp}.png', dpi=300, bbox_inches='tight')
     plt.close()
@@ -2018,7 +2023,7 @@ def create_visualizations(df, output_dir):
     if 'DMFT_Index' in df_plot.columns:
         fig, ax = plt.subplots(figsize=(10, 6))
         sns.boxplot(x='abuse', y='DMFT_Index', data=df_plot, order=abuse_order, palette=colors, ax=ax, hue='abuse', legend=False)
-        ax.set_title('Distribution of DMFT Index by Abuse Type', fontsize=16, fontweight='bold')
+        # ax.set_title('Distribution of DMFT Index by Abuse Type', fontsize=16, fontweight='bold')
         plt.tight_layout()
         plt.savefig(f'{output_dir}figure1_dmft_boxplot.png', dpi=300)
         plt.close()
@@ -2113,8 +2118,9 @@ def plot_boxplot_with_dunn(df, var_name, group_col='abuse', xlabel=None, ylabel=
     ax.set_ylabel(ylabel if ylabel else var_name, fontsize=label_fontsize, fontweight='bold')
     
     plot_title = title if title else f'{ylabel or var_name} by Abuse Type'
-    ax.set_title(plot_title, fontsize=title_fontsize, pad=20)
+    # ax.set_title(plot_title, fontsize=title_fontsize, pad=20)
     plt.tight_layout()
+    
     plt.savefig(os.path.join(output_dir, f'pairwise_results_{var_name}_{timestamp}.png'), dpi=300)
     plt.close()
 
@@ -2194,7 +2200,7 @@ def plot_boxplot_by_dentition_type(df, xlabel=None, ylabel=None, title=None, tit
     ax.set_ylabel(ylabel if ylabel else 'DMFT Index', fontsize=label_fontsize, fontweight='bold')
     
     plot_title = title if title else f'{ylabel or "DMFT Index"} by Dentition Period'
-    ax.set_title(plot_title, fontsize=title_fontsize, pad=20)
+    # ax.set_title(plot_title, fontsize=title_fontsize, pad=20)
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, f'pairwise_results_dentition_type_{timestamp}.png'), dpi=300)
     plt.close()

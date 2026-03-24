@@ -446,12 +446,19 @@ def main():
     create_visualizations(df, OUTPUT_DIR)
 
     # Pairwise plots (note: Care_Index plotted among DMFT>0 only in revised function)
-    for var in ['DMFT_Index', 'Healthy_Rate', 'Baby_d', 'Baby_DMFT', 'Care_Index', 'UTN_Score']:
+    for var in ['Healthy_Rate', 
+                # 'DMFT_Index',
+                'Baby_d', 
+                'Baby_DMFT', 
+                'Care_Index', 
+                'UTN_Score']:
         try:
             plot_boxplot_with_dunn(df, var, group_col='abuse', ylabel=var, output_dir=OUTPUT_DIR)
         except Exception as e:
             print(f"Error drawing pairwise plot for {var}: {e}")
     plot_boxplot_by_dentition_type(df, output_dir=OUTPUT_DIR)
+
+    plot_boxplot_with_dunn(df, 'DMFT_Index', group_col='abuse', ylabel='Caries Experience', output_dir=OUTPUT_DIR)
 
     # Summary report
     generate_summary_report(df, t3_overall, OUTPUT_DIR, timestamp)
