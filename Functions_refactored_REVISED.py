@@ -315,7 +315,8 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
     abuse_types = list(df['abuse'].cat.categories)
 
     continuous_vars = [
-        'DMFT_Index', 'Perm_DMFT', 'Baby_DMFT',
+        'DMFT_Index', 'decayed_total', 'missing_total', 'filled_total',
+        'Perm_DMFT', 'Baby_DMFT',
         'Perm_D', 'Perm_M', 'Perm_F',
         'Baby_d', 'Baby_m', 'Baby_f',
         'C0_Count', 'Healthy_Rate', 'Care_Index',
@@ -341,23 +342,43 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
         if len(groups) < 2:
             continue
 
+        row = {
+            'Variable': var,
+            'Test': 'Kruskal-Wallis'
+        }
+        
+        # Calculate Total Descriptive Stats
+        total_data = df_var[var].dropna()
+        if len(total_data) > 0:
+            std_val = total_data.std(ddof=1)
+            row['Total_Mean_SD'] = f"{total_data.mean():.2f} ± {std_val:.2f}" if pd.notna(std_val) else f"{total_data.mean():.2f}"
+            row['Total_Median_IQR'] = f"{total_data.median():.1f} [{total_data.quantile(0.25):.1f}-{total_data.quantile(0.75):.1f}]"
+        else:
+            row['Total_Mean_SD'] = 'N/A'
+            row['Total_Median_IQR'] = 'N/A'
+
+        # Calculate Abuse Group Descriptive Stats
+        for abuse in abuse_types:
+            subset = df_var[df_var['abuse'] == abuse][var].dropna()
+            if len(subset) > 0:
+                s_std = subset.std(ddof=1)
+                row[f'{abuse}_Mean_SD'] = f"{subset.mean():.2f} ± {s_std:.2f}" if pd.notna(s_std) else f"{subset.mean():.2f}"
+                row[f'{abuse}_Median_IQR'] = f"{subset.median():.1f} [{subset.quantile(0.25):.1f}-{subset.quantile(0.75):.1f}]"
+            else:
+                row[f'{abuse}_Mean_SD'] = 'N/A'
+                row[f'{abuse}_Median_IQR'] = 'N/A'
+
         try:
             h_stat, p_kw = kruskal(*groups)
-            overall_results.append({
-                'Variable': var,
-                'Test': 'Kruskal-Wallis',
-                'Statistic': f"{h_stat:.3f}",
-                'p-value': f"{p_kw:.4f}" if p_kw >= 0.0001 else "<0.0001",
-                'Significant': 'Yes' if p_kw < 0.05 else 'No'
-            })
+            row['Statistic'] = f"{h_stat:.3f}"
+            row['p-value'] = f"{p_kw:.4f}" if p_kw >= 0.0001 else "<0.0001"
+            row['Significant'] = 'Yes' if p_kw < 0.05 else 'No'
         except Exception:
-            overall_results.append({
-                'Variable': var,
-                'Test': 'Kruskal-Wallis',
-                'Statistic': 'N/A',
-                'p-value': 'N/A',
-                'Significant': 'N/A'
-            })
+            row['Statistic'] = 'N/A'
+            row['p-value'] = 'N/A'
+            row['Significant'] = 'N/A'
+            
+        overall_results.append(row)
 
     posthoc_results = []
     tidy_posthoc_pairwise = []
