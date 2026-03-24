@@ -138,6 +138,7 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
     denom = df['DMFT_Index'].astype(float)
     filled_total = (df['Perm_F'] + df['Baby_f']).astype(float)
     decayed_total = (df['Perm_D'] + df['Baby_d']).astype(float)
+    missing_total = (df['Perm_M'] + df['Baby_m']).astype(float)
 
     df['Care_Index'] = (filled_total / denom * 100).replace([np.inf, -np.inf], np.nan)
     df.loc[denom <= 0, 'Care_Index'] = np.nan  # explicit

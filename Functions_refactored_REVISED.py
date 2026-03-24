@@ -173,6 +173,9 @@ def create_table2_oral_health_descriptive(df: pd.DataFrame):
 
     continuous_vars = [
         ('DMFT_Index', 'DMFT Index (Total)'),
+        ("decayed_total", "Decayed Total (D+d)"),
+        ("missing_total", "Missing Total (M+m)"),
+        ("filled_total", "Filled Total (F+f)"),
         ('Perm_DMFT', 'Permanent DMFT'),
         ('Baby_DMFT', 'Primary dmft'),
         ('Perm_D', 'Permanent D (Decayed)'),
