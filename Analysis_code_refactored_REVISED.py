@@ -411,7 +411,7 @@ def main():
         y_col='DMFT_Index',
         show_points=True,
         show_within_dentition_sig=True,   # 每个 dentition 内 abuse 间显著性
-        show_within_abuse_sig=True,      # 先不画 abuse 内 dentition 间显著性，避免太乱
+        show_within_abuse_sig=False,      # 先不画 abuse 内 dentition 间显著性，避免太乱
         figsize=(18, 9),
         save_path=os.path.join(OUTPUT_DIR, f'figure_dmft_dentition_abuse_{timestamp}.png')
     )
