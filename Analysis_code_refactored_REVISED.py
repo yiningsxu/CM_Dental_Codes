@@ -93,12 +93,16 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
     # Coding:
     # -1: 未萌出、0: 健全、1: 処置歯、2: C0、3: C、4: 喪失歯、5: その他過剰歯等、6: 先天性欠損、7: 歯牙破折、8: 乳歯晩期残存、9: 癒合歯
     if perm_cols:
-        df['Perm_D'] = (df[perm_cols] == 3).sum(axis=1)
-        df['Perm_M'] = (df[perm_cols] == 4).sum(axis=1)
-        df['Perm_F'] = (df[perm_cols] == 1).sum(axis=1)
-        df['Perm_Sound'] = (df[perm_cols] == 0).sum(axis=1)
+        # すべての要素が NaN かどうかを判定するためのマスクを作成
+        # (すべてが NaN の行は True、一つでもデータがあれば False)
+        all_nan_mask = df[perm_cols].isna().all(axis=1)
+
+        df['Perm_D'] = (df[perm_cols] == 3).sum(axis=1).where(~all_nan_mask, np.nan)
+        df['Perm_M'] = (df[perm_cols] == 4).sum(axis=1).where(~all_nan_mask, np.nan)
+        df['Perm_F'] = (df[perm_cols] == 1).sum(axis=1).where(~all_nan_mask, np.nan)
+        df['Perm_Sound'] = (df[perm_cols] == 0).sum(axis=1).where(~all_nan_mask, np.nan)
         df['Perm_DMFT'] = df['Perm_D'] + df['Perm_M'] + df['Perm_F']
-        df['Perm_C0'] = (df[perm_cols] == 2).sum(axis=1)
+        df['Perm_C0'] = (df[perm_cols] == 2).sum(axis=1).where(~all_nan_mask, np.nan)
         df['Perm_DMFT_C0'] = df['Perm_DMFT'] + df['Perm_C0']
         df['Perm_total_teeth'] = ((df[perm_cols].notna()) & (df[perm_cols] != -1)).sum(axis=1)
         df['Perm_sound_rate'] = (df['Perm_Sound'] / df['Perm_total_teeth'] * 100).replace([np.inf, -np.inf], np.nan)
@@ -106,13 +110,18 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
         for col in ['Perm_D', 'Perm_M', 'Perm_F', 'Perm_Sound', 'Perm_DMFT', 'Perm_C0', 'Perm_DMFT_C0', 'Perm_total_teeth', 'Perm_sound_rate']:
             df[col] = np.nan
 
+    
     if baby_cols:
-        df['Baby_d'] = (df[baby_cols] == 3).sum(axis=1)
-        df['Baby_m'] = (df[baby_cols] == 4).sum(axis=1)
-        df['Baby_f'] = (df[baby_cols] == 1).sum(axis=1)
-        df['Baby_sound'] = (df[baby_cols] == 0).sum(axis=1)
+        # すべての要素が NaN かどうかを判定するためのマスクを作成
+        # (すべてが NaN の行は True、一つでもデータがあれば False)
+        all_nan_mask = df[baby_cols].isna().all(axis=1)
+
+        df['Baby_d'] = (df[baby_cols] == 3).sum(axis=1).where(~all_nan_mask, np.nan)
+        df['Baby_m'] = (df[baby_cols] == 4).sum(axis=1).where(~all_nan_mask, np.nan)
+        df['Baby_f'] = (df[baby_cols] == 1).sum(axis=1).where(~all_nan_mask, np.nan)
+        df['Baby_sound'] = (df[baby_cols] == 0).sum(axis=1).where(~all_nan_mask, np.nan)
         df['Baby_DMFT'] = df['Baby_d'] + df['Baby_m'] + df['Baby_f']
-        df['Baby_C0'] = (df[baby_cols] == 2).sum(axis=1)
+        df['Baby_C0'] = (df[baby_cols] == 2).sum(axis=1).where(~all_nan_mask, np.nan)
         df['Baby_DMFT_C0'] = df['Baby_DMFT'] + df['Baby_C0']
         df['Baby_total_teeth'] = ((df[baby_cols].notna()) & (df[baby_cols] != -1)).sum(axis=1)
         df['Baby_sound_rate'] = (df['Baby_sound'] / df['Baby_total_teeth'] * 100).replace([np.inf, -np.inf], np.nan)
@@ -151,7 +160,7 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
 
     df.to_csv('/Users/ayo/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analysis/data/df.csv', index=False)
 
-    # Dentition type
+    # Dentition type: 晩期残存は混合歯列になる
     def get_dentition_type(row):
         present_teeth = row['total_teeth'] if pd.notna(row['total_teeth']) else 0
         present_baby = row['Baby_total_teeth'] if pd.notna(row['Baby_total_teeth']) else 0
