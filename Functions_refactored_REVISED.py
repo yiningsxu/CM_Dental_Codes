@@ -1250,7 +1250,33 @@ def create_table6_dmft_by_dentition_abuse(df: pd.DataFrame):
         else:
             p_val_str = "N/A"
 
-        first_row = True
+        # Overall row for the entire dentition type
+        overall_subset = df_dent['DMFT_Index'].dropna()
+        if len(overall_subset) > 0:
+            mean_val = overall_subset.mean()
+            sd_val = overall_subset.std(ddof=1) if len(overall_subset) > 1 else np.nan
+            median_val = overall_subset.median()
+            q1 = overall_subset.quantile(0.25)
+            q3 = overall_subset.quantile(0.75)
+            
+            row = {
+                'Dentition_Type': dent_type,
+                'Abuse_Type': 'Total',
+                'N': len(overall_subset),
+                'Mean': round(mean_val, 2) if pd.notna(mean_val) else np.nan,
+                'SD': round(sd_val, 2) if pd.notna(sd_val) else np.nan,
+                'Median': round(median_val, 2) if pd.notna(median_val) else np.nan,
+                'IQR': f"{q1:.2f}-{q3:.2f}" if pd.notna(q1) and pd.notna(q3) else np.nan,
+                "Min": round(overall_subset.min(), 2) if pd.notna(overall_subset.min()) else np.nan,
+                "Max": round(overall_subset.max(), 2) if pd.notna(overall_subset.max()) else np.nan,
+                'Mean_SD': f"{mean_val:.2f} ± {sd_val:.2f}" if pd.notna(mean_val) and pd.notna(sd_val) else (f"{mean_val:.2f}" if pd.notna(mean_val) else np.nan),
+                'Median_IQR': f"{median_val:.1f} [{q1:.1f}-{q3:.1f}]" if pd.notna(median_val) and pd.notna(q1) and pd.notna(q3) else np.nan,
+                "Min-Max": f"{overall_subset.min():.1f}-{overall_subset.max():.1f}" if pd.notna(overall_subset.min()) and pd.notna(overall_subset.max()) else np.nan,
+                'p-value (KW within dentition)': p_val_str
+            }
+            summary_results.append(row)
+
+        first_row = False
         for abuse in abuse_types:
             subset = df_dent[df_dent['abuse'] == abuse]['DMFT_Index'].dropna()
             if len(subset) == 0:
@@ -1270,8 +1296,11 @@ def create_table6_dmft_by_dentition_abuse(df: pd.DataFrame):
                 'SD': round(sd_val, 2) if pd.notna(sd_val) else np.nan,
                 'Median': round(median_val, 2) if pd.notna(median_val) else np.nan,
                 'IQR': f"{q1:.2f}-{q3:.2f}" if pd.notna(q1) and pd.notna(q3) else np.nan,
+                "Min": round(subset.min(), 2) if pd.notna(subset.min()) else np.nan,
+                "Max": round(subset.max(), 2) if pd.notna(subset.max()) else np.nan,
                 'Mean_SD': f"{mean_val:.2f} ± {sd_val:.2f}" if pd.notna(mean_val) and pd.notna(sd_val) else (f"{mean_val:.2f}" if pd.notna(mean_val) else np.nan),
-                'Median_IQR': f"{median_val:.2f} [{q1:.2f}-{q3:.2f}]" if pd.notna(median_val) and pd.notna(q1) and pd.notna(q3) else np.nan,
+                'Median_IQR': f"{median_val:.1f} [{q1:.1f}-{q3:.1f}]" if pd.notna(median_val) and pd.notna(q1) and pd.notna(q3) else np.nan,
+                "Min-Max": f"{subset.min():.1f}-{subset.max():.1f}" if pd.notna(subset.min()) and pd.notna(subset.max()) else np.nan,
                 'p-value (KW within dentition)': p_val_str if first_row else ''
             }
             summary_results.append(row)
