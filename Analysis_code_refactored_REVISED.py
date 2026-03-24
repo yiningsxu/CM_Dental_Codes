@@ -137,8 +137,11 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
     # Indices (explicitly undefined when DMFT_Index == 0)
     denom = df['DMFT_Index'].astype(float)
     filled_total = (df['Perm_F'] + df['Baby_f']).astype(float)
+    df['filled_total'] = filled_total
     decayed_total = (df['Perm_D'] + df['Baby_d']).astype(float)
+    df['decayed_total'] = decayed_total
     missing_total = (df['Perm_M'] + df['Baby_m']).astype(float)
+    df['missing_total'] = missing_total
 
     df['Care_Index'] = (filled_total / denom * 100).replace([np.inf, -np.inf], np.nan)
     df.loc[denom <= 0, 'Care_Index'] = np.nan  # explicit
