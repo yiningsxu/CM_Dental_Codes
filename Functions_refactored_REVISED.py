@@ -2049,7 +2049,13 @@ def plot_boxplot_with_dunn(df, var_name, group_col='abuse', xlabel=None, ylabel=
         data = data[data['DMFT_Index'] > 0]
     if data.empty: return
     
-    categories = sorted(data[group_col].unique())
+    if group_col == 'abuse':
+        preferred_order = ['Physical Abuse', 'Neglect', 'Emotional Abuse', 'Sexual Abuse']
+        categories = [a for a in preferred_order if a in data[group_col].unique()]
+        categories += sorted([a for a in data[group_col].unique() if a not in preferred_order])
+    else:
+        categories = sorted(data[group_col].unique())
+        
     try:
         dunn_results = sp.posthoc_dunn(data, val_col=var_name, group_col=group_col, p_adjust=p_adjust)
     except: return
