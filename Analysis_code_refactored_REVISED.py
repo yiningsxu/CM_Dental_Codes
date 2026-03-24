@@ -95,52 +95,52 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
     if perm_cols:
         # すべての要素が NaN かどうかを判定するためのマスクを作成
         # (すべてが NaN の行は True、一つでもデータがあれば False)
-        all_nan_mask = df[perm_cols].isna().all(axis=1)
+        all_nan_mask_perm = df[perm_cols].isna().all(axis=1)
 
-        df['Perm_D'] = (df[perm_cols] == 3).sum(axis=1).where(~all_nan_mask, np.nan)
-        df['Perm_M'] = (df[perm_cols] == 4).sum(axis=1).where(~all_nan_mask, np.nan)
-        df['Perm_F'] = (df[perm_cols] == 1).sum(axis=1).where(~all_nan_mask, np.nan)
-        df['Perm_Sound'] = (df[perm_cols] == 0).sum(axis=1).where(~all_nan_mask, np.nan)
+        df['Perm_D'] = (df[perm_cols] == 3).sum(axis=1).where(~all_nan_mask_perm, np.nan)
+        df['Perm_M'] = (df[perm_cols] == 4).sum(axis=1).where(~all_nan_mask_perm, np.nan)
+        df['Perm_F'] = (df[perm_cols] == 1).sum(axis=1).where(~all_nan_mask_perm, np.nan)
+        df['Perm_Sound'] = (df[perm_cols] == 0).sum(axis=1).where(~all_nan_mask_perm, np.nan)
         df['Perm_DMFT'] = df['Perm_D'] + df['Perm_M'] + df['Perm_F']
-        df['Perm_C0'] = (df[perm_cols] == 2).sum(axis=1).where(~all_nan_mask, np.nan)
+        df['Perm_C0'] = (df[perm_cols] == 2).sum(axis=1).where(~all_nan_mask_perm, np.nan)
         df['Perm_DMFT_C0'] = df['Perm_DMFT'] + df['Perm_C0']
         df['Perm_total_teeth'] = ((df[perm_cols].notna()) & (df[perm_cols] != -1)).sum(axis=1)
         df['Perm_sound_rate'] = (df['Perm_Sound'] / df['Perm_total_teeth'] * 100).replace([np.inf, -np.inf], np.nan)
-    else:
-        for col in ['Perm_D', 'Perm_M', 'Perm_F', 'Perm_Sound', 'Perm_DMFT', 'Perm_C0', 'Perm_DMFT_C0', 'Perm_total_teeth', 'Perm_sound_rate']:
-            df[col] = np.nan
+    # else:
+    #     for col in ['Perm_D', 'Perm_M', 'Perm_F', 'Perm_Sound', 'Perm_DMFT', 'Perm_C0', 'Perm_DMFT_C0', 'Perm_total_teeth', 'Perm_sound_rate']:
+    #         df[col] = np.nan
 
     
     if baby_cols:
         # すべての要素が NaN かどうかを判定するためのマスクを作成
         # (すべてが NaN の行は True、一つでもデータがあれば False)
-        all_nan_mask = df[baby_cols].isna().all(axis=1)
+        all_nan_mask_baby = df[baby_cols].isna().all(axis=1)
 
-        df['Baby_d'] = (df[baby_cols] == 3).sum(axis=1).where(~all_nan_mask, np.nan)
-        df['Baby_m'] = (df[baby_cols] == 4).sum(axis=1).where(~all_nan_mask, np.nan)
-        df['Baby_f'] = (df[baby_cols] == 1).sum(axis=1).where(~all_nan_mask, np.nan)
-        df['Baby_sound'] = (df[baby_cols] == 0).sum(axis=1).where(~all_nan_mask, np.nan)
+        df['Baby_d'] = (df[baby_cols] == 3).sum(axis=1).where(~all_nan_mask_baby, np.nan)
+        df['Baby_m'] = (df[baby_cols] == 4).sum(axis=1).where(~all_nan_mask_baby, np.nan)
+        df['Baby_f'] = (df[baby_cols] == 1).sum(axis=1).where(~all_nan_mask_baby, np.nan)
+        df['Baby_sound'] = (df[baby_cols] == 0).sum(axis=1).where(~all_nan_mask_baby, np.nan)
         df['Baby_DMFT'] = df['Baby_d'] + df['Baby_m'] + df['Baby_f']
-        df['Baby_C0'] = (df[baby_cols] == 2).sum(axis=1).where(~all_nan_mask, np.nan)
+        df['Baby_C0'] = (df[baby_cols] == 2).sum(axis=1).where(~all_nan_mask_baby, np.nan)
         df['Baby_DMFT_C0'] = df['Baby_DMFT'] + df['Baby_C0']
         df['Baby_total_teeth'] = ((df[baby_cols].notna()) & (df[baby_cols] != -1)).sum(axis=1)
         df['Baby_sound_rate'] = (df['Baby_sound'] / df['Baby_total_teeth'] * 100).replace([np.inf, -np.inf], np.nan)
-    else:
-        for col in ['Baby_d', 'Baby_m', 'Baby_f', 'Baby_sound', 'Baby_DMFT', 'Baby_C0', 'Baby_DMFT_C0', 'Baby_total_teeth', 'Baby_sound_rate']:
-            df[col] = np.nan
+    # else:
+    #     for col in ['Baby_d', 'Baby_m', 'Baby_f', 'Baby_sound', 'Baby_DMFT', 'Baby_C0', 'Baby_DMFT_C0', 'Baby_total_teeth', 'Baby_sound_rate']:
+    #         df[col] = np.nan
 
     # Total
-    df['DMFT_Index'] = df['Perm_DMFT'] + df['Baby_DMFT']
-    df['DMFT_C0'] = df['Perm_DMFT_C0'] + df['Baby_DMFT_C0']
-    df['C0_Count'] = df['Perm_C0'] + df['Baby_C0']
+    df['DMFT_Index'] = df['Perm_DMFT'].add(df['Baby_DMFT'], fill_value=0)
+    df['DMFT_C0'] = df['Perm_DMFT_C0'].add(df['Baby_DMFT_C0'], fill_value=0)
+    df['C0_Count'] = df['Perm_C0'].add(df['Baby_C0'], fill_value=0)
 
     # Indices (explicitly undefined when DMFT_Index == 0)
     denom = df['DMFT_Index'].astype(float)
-    filled_total = (df['Perm_F'] + df['Baby_f']).astype(float)
+    filled_total = df['Perm_F'].add(df['Baby_f'], fill_value=0).astype(float)
     df['filled_total'] = filled_total
-    decayed_total = (df['Perm_D'] + df['Baby_d']).astype(float)
+    decayed_total = df['Perm_D'].add(df['Baby_d'], fill_value=0).astype(float)
     df['decayed_total'] = decayed_total
-    missing_total = (df['Perm_M'] + df['Baby_m']).astype(float)
+    missing_total = df['Perm_M'].add(df['Baby_m'], fill_value=0).astype(float)
     df['missing_total'] = missing_total
 
     df['Care_Index'] = (filled_total / denom * 100).replace([np.inf, -np.inf], np.nan)
@@ -150,7 +150,7 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[denom <= 0, 'UTN_Score'] = np.nan  # explicit
 
     df['total_teeth'] = df['Perm_total_teeth'] + df['Baby_total_teeth']
-    df['Healthy_Rate'] = ((df['Perm_Sound'] + df['Baby_sound']) / df['total_teeth'] * 100).replace([np.inf, -np.inf], np.nan)
+    df['Healthy_Rate'] = ((df['Perm_Sound'].add(df['Baby_sound'], fill_value=0)) / df['total_teeth'] * 100).replace([np.inf, -np.inf], np.nan)
     df.loc[df['total_teeth'] <= 0, 'Healthy_Rate'] = np.nan
 
     # Aliases for downstream functions
@@ -161,8 +161,6 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
     # Binary outcomes
     df['has_caries'] = (df['DMFT_Index'] > 0).astype(int)
     df['has_untreated_caries'] = (decayed_total > 0).astype(int)
-
-    df.to_csv('/Users/ayo/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analysis/data/df.csv', index=False)
 
     # Dentition type: 晩期残存は混合歯列になる
     def get_dentition_type(row):
@@ -183,6 +181,8 @@ def _engineer_oral_health_variables(df: pd.DataFrame) -> pd.DataFrame:
     # Year (for optional year fixed effects)
     if 'date' in df.columns and pd.api.types.is_datetime64_any_dtype(df['date']):
         df['year'] = df['date'].dt.year
+    
+    df.to_csv('/Users/ayo/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analysis/data/df.csv', index=False)
 
     return df
 

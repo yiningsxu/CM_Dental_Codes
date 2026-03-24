@@ -1205,21 +1205,21 @@ def create_table6_dmft_by_dentition_abuse(df: pd.DataFrame):
             print("   ⚠ 'Present_Baby_Teeth' column not found")
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-        def get_dentition_type(row):
-            present_teeth = row['Present_Teeth'] if pd.notna(row['Present_Teeth']) else 0
-            present_baby = row['Present_Baby_Teeth'] if pd.notna(row['Present_Baby_Teeth']) else 0
-            present_perm = row['Present_Perm_Teeth'] if pd.notna(row['Present_Perm_Teeth']) else 0
+        # def get_dentition_type(row):
+        #     present_teeth = row['Present_Teeth'] if pd.notna(row['Present_Teeth']) else 0
+        #     present_baby = row['Present_Baby_Teeth'] if pd.notna(row['Present_Baby_Teeth']) else 0
+        #     present_perm = row['Present_Perm_Teeth'] if pd.notna(row['Present_Perm_Teeth']) else 0
 
-            if present_teeth == 0:
-                return 'No_Teeth'
-            elif present_baby == present_teeth and present_perm == 0:
-                return 'primary_dentition'
-            elif present_perm == present_teeth and present_baby == 0:
-                return 'permanent_dentition'
-            else:
-                return 'mixed_dentition'
+        #     if present_teeth == 0:
+        #         return 'No_Teeth'
+        #     elif present_baby == present_teeth and present_perm == 0:
+        #         return 'primary_dentition'
+        #     elif present_perm == present_teeth and present_baby == 0:
+        #         return 'permanent_dentition'
+        #     else:
+        #         return 'mixed_dentition'
 
-        df_analysis['dentition_type'] = df_analysis.apply(get_dentition_type, axis=1)
+        # df_analysis['dentition_type'] = df_analysis.apply(get_dentition_type, axis=1)
 
     # orders
     abuse_types = list(df_analysis['abuse'].cat.categories) if pd.api.types.is_categorical_dtype(df_analysis['abuse']) else sorted(df_analysis['abuse'].dropna().unique())
@@ -1570,7 +1570,8 @@ def plot_overall_dentition_refined(df, posthoc_df, y_col='DMFT_Index', xlabel=No
         
         # 平均值标注
         m_val = data.mean()
-        ax.text(i, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontweight='bold')
+        if pd.notna(m_val):
+            ax.text(i, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontweight='bold')
 
     # 3. 显著性标注 (仅显示显著项)
     if posthoc_df is not None and not posthoc_df.empty:
@@ -1650,7 +1651,8 @@ def plot_abuse_by_dentition_facet_refined(df, posthoc_df, y_col='DMFT_Index', xl
             jitter = rng.uniform(-0.15, 0.15, size=len(data))
             ax.scatter(np.full(len(data), j) + jitter, data, alpha=0.4, s=20, color='gray')
             m_val = data.mean()
-            ax.text(j, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontsize=9, fontweight='bold')
+            if pd.notna(m_val):
+                ax.text(j, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontsize=9, fontweight='bold')
 
         # 3. 显著性标注 (Within Dentition)
         if posthoc_df is not None and not posthoc_df.empty:
@@ -2042,7 +2044,8 @@ def plot_boxplot_with_dunn(df, var_name, group_col='abuse', xlabel=None, ylabel=
         jitter = rng.uniform(-0.15, 0.15, size=len(p_data))
         ax.scatter(np.full(len(p_data), i) + jitter, p_data, alpha=0.4, s=25, color='gray', edgecolors='none')
         m_val = p_data.mean()
-        ax.text(i, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontweight='bold')
+        if pd.notna(m_val):
+            ax.text(i, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontweight='bold')
 
     y_range = y_max_data - data[var_name].min()
     h_step = y_range * 0.1 if y_range > 0 else 1
@@ -2122,7 +2125,8 @@ def plot_boxplot_by_dentition_type(df, xlabel=None, ylabel=None, title=None, tit
         jitter = rng.uniform(-0.15, 0.15, size=len(p_data))
         ax.scatter(np.full(len(p_data), i) + jitter, p_data, alpha=0.4, s=25, color='gray', edgecolors='none')
         m_val = p_data.mean()
-        ax.text(i, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontweight='bold')
+        if pd.notna(m_val):
+            ax.text(i, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontweight='bold')
 
     y_range = y_max_data - data['DMFT_Index'].min()
     h_step = y_range * 0.1 if y_range > 0 else 1
