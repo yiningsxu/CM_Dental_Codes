@@ -533,7 +533,7 @@ def create_table3_statistical_comparisons(df: pd.DataFrame):
                 })
             except Exception:
                 pass
-    print(posthoc_results)
+    # print(posthoc_results)
 
     return pd.DataFrame(overall_results), pd.DataFrame(posthoc_results), pd.DataFrame(pairwise_results), tidy_posthoc_pairwise
 
@@ -611,7 +611,7 @@ def _fit_pairwise_logit(
     extra_terms: list = None,
     id_col: str = None,
     force_firth: bool = False
-):
+    ):
     """Fit a (pairwise) logistic regression model and return OR/CI/p for `comparison`.
 
     df_model must contain: outcome_var, age_year, sex_male, comparison, and any extra covariates.
@@ -697,7 +697,7 @@ def create_table4_multivariate_analysis(
     strata_order: list = None,
     min_n: int = 50,
     force_firth: bool = False
-) -> pd.DataFrame:
+    ) -> pd.DataFrame:
     """Table 4: Multivariable logistic regression (pairwise vs reference)
 
     Improvements vs. original:
@@ -1538,7 +1538,7 @@ def plot_dmft_by_dentition_abuse(
     show_within_abuse_sig: bool = False,
     figsize=(18, 9),
     save_path: str = None
-):
+    ):
     """
     Plot DMFT_Index by dentition period and abuse subtype.
 
@@ -1861,6 +1861,154 @@ def plot_dmft_by_dentition_abuse(
 
     plt.show()
 
+def p_to_star(p_val):
+    """将p值转换为星号"""
+    if str(p_val).startswith('<'):
+        p = 0.0001
+    else:
+        p = float(p_val)
+    if p < 0.001: return '***'
+    if p < 0.01: return '**'
+    if p < 0.05: return '*'
+    return ''
+
+def plot_overall_dentition_refined(df, posthoc_df, y_col='DMFT_Index', ylabel=None, save_path=None):
+    """图1：整体牙列分期对比"""
+    dentition_order = ['primary_dentition', 'mixed_dentition', 'permanent_dentition']
+    df_plot = df[df['dentition_type'].isin(dentition_order)].copy()
+    
+    fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+    
+    # 准备数据
+    plot_data = [df_plot[df_plot['dentition_type'] == d][y_col].dropna() for d in dentition_order]
+    positions = np.arange(len(dentition_order))
+    
+    # 1. 绘制箱线图
+    bp = ax.boxplot(plot_data, positions=positions, widths=0.5, patch_artist=False,
+                    showmeans=True, meanline=True, showfliers=False,
+                    meanprops={'color': 'red', 'linestyle': '--', 'linewidth': 1.5},
+                    boxprops={'color': 'black'})
+
+    # 2. 绘制散点和平均值文本
+    rng = np.random.default_rng(42)
+    y_max_data = df_plot[y_col].max()
+    
+    for i, data in enumerate(plot_data):
+        # 抖动散点
+        jitter = rng.uniform(-0.15, 0.15, size=len(data))
+        ax.scatter(np.full(len(data), i) + jitter, data, alpha=0.4, s=25, color='gray', edgecolors='none')
+        
+        # 平均值标注
+        m_val = data.mean()
+        ax.text(i, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontweight='bold')
+
+    # 3. 显著性标注 (仅显示显著项)
+    if posthoc_df is not None and not posthoc_df.empty:
+        sig_results = posthoc_df[posthoc_df['Significant'] == 'Yes'].copy()
+        # 排序以防支架重叠
+        sig_results['dist'] = sig_results.apply(lambda r: abs(dentition_order.index(r['Group1']) - dentition_order.index(r['Group2'])), axis=1)
+        sig_results = sig_results.sort_values('dist')
+        
+        y_ref = y_max_data * 1.05
+        step = y_max_data * 0.1
+        
+        for idx, row in sig_results.reset_index().iterrows():
+            x1 = dentition_order.index(row['Group1'])
+            x2 = dentition_order.index(row['Group2'])
+            h = y_ref + idx * step
+            stars = p_to_star(row['p-value (adjusted)'])
+            
+            ax.plot([x1, x1, x2, x2], [h, h + step*0.2, h + step*0.2, h], lw=1.2, c='black')
+            ax.text((x1+x2)/2, h + step*0.2, stars, ha='center', va='bottom', fontsize=12)
+        
+        ax.set_ylim(top=y_ref + (len(sig_results)+1) * step)
+
+    ax.set_xticks(positions)
+    xtick_labels = [f"{d.replace('_', ' ').title()}\n(n={len(data)})" for d, data in zip(dentition_order, plot_data)]
+    ax.set_xticklabels(xtick_labels, fontsize=14, fontweight='bold')
+    ax.set_ylabel(ylabel, fontsize=14, fontweight='bold')
+    ax.set_title(f'Overall {ylabel} by Dentition Period', fontsize=14, pad=20)
+    
+    plt.tight_layout()
+    if save_path: plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    # plt.show()
+
+def plot_abuse_by_dentition_facet_refined(df, posthoc_df, y_col='DMFT_Index', ylabel=None, save_path=None):
+    """图2：分牙列周期的受虐类型对比 (三并列)"""
+    dentition_order = ['primary_dentition', 'mixed_dentition', 'permanent_dentition']
+    # 确保虐待类型顺序一致
+    preferred_abuse = ['Physical Abuse', 'Neglect', 'Emotional Abuse', 'Sexual Abuse']
+    existing_abuse = [a for a in preferred_abuse if a in df['abuse'].unique()]
+    
+    fig, axes = plt.subplots(1, 3, figsize=(22, 8), sharey=True, dpi=300)
+    rng = np.random.default_rng(42)
+    
+    for i, dent in enumerate(dentition_order):
+        ax = axes[i]
+        df_sub = df[df['dentition_type'] == dent].copy()
+        
+        # 准备数据
+        plot_data = []
+        labels = []
+        xtick_labels = []
+        for abuse in existing_abuse:
+            subset = df_sub[df_sub['abuse'] == abuse][y_col].dropna()
+            if not subset.empty:
+                plot_data.append(subset)
+                short_name = abuse.replace(' Abuse', '')
+                labels.append(short_name)
+                xtick_labels.append(f"{short_name}\n(n={len(subset)})")
+        
+        if not plot_data: 
+            ax.set_title(f"{dent}\n(No Data)")
+            continue
+            
+        # 1. 箱线图
+        positions = np.arange(len(plot_data))
+        ax.boxplot(plot_data, positions=positions, widths=0.6, 
+                   patch_artist=False,
+                   showmeans=True, meanline=True, showfliers=False,
+                   meanprops={'color': 'red', 'linestyle': '--', 'linewidth': 1.2},
+                   boxprops={'color': 'black'})
+        
+        # 2. 散点与平均值
+        for j, data in enumerate(plot_data):
+            jitter = rng.uniform(-0.15, 0.15, size=len(data))
+            ax.scatter(np.full(len(data), j) + jitter, data, alpha=0.4, s=20, color='gray')
+            m_val = data.mean()
+            ax.text(j, m_val, f'{m_val:.2f}', color='red', ha='center', va='bottom', fontsize=9, fontweight='bold')
+
+        # 3. 显著性标注 (Within Dentition)
+        if posthoc_df is not None and not posthoc_df.empty:
+            sub_sig = posthoc_df[(posthoc_df['Dentition_Type'] == dent) & (posthoc_df['Significant'] == 'Yes')].copy()
+            if not sub_sig.empty:
+                y_max_local = df_sub[y_col].max()
+                y_ref = y_max_local * 1.05
+                step = y_max_local * 0.12
+                
+                for idx, row in sub_sig.reset_index().iterrows():
+                    try:
+                        g1_label = row['Group1'].replace(' Abuse', '')
+                        g2_label = row['Group2'].replace(' Abuse', '')
+                        x1 = labels.index(g1_label)
+                        x2 = labels.index(g2_label)
+                        h = y_ref + idx * step
+                        stars = p_to_star(row['p-value (adjusted)'])
+                        
+                        ax.plot([x1, x1, x2, x2], [h, h + step*0.2, h + step*0.2, h], lw=1, c='black')
+                        ax.text((x1+x2)/2, h + step*0.2, stars, ha='center', va='bottom')
+                    except ValueError: continue
+
+        ax.set_title(dent.replace('_', ' ').title(), fontsize=16, fontweight='bold', pad=15)
+        ax.set_xticks(positions)
+        ax.set_xticklabels(xtick_labels, rotation=0,fontsize=14, fontweight='bold')
+        if i == 0: ax.set_ylabel(ylabel, fontsize=14, fontweight='bold')
+
+    plt.suptitle(f'Comparison of {ylabel} by Abuse Type across Dentition Stages', fontsize=16, y=1.02)
+    plt.tight_layout()
+    if save_path: plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    # plt.show()
+    
 def pairwise_mannwhitney(df, var_name, group_col='abuse', p_adjust='bonferroni'):
     # ... (Implementation similar to original) ...
     if df[group_col].dtype.name == 'category':

@@ -27,6 +27,8 @@ try:
         create_table5_5_caries_prevalence_treatment,
         create_table6_dmft_by_dentition_abuse,
         plot_dmft_by_dentition_abuse,
+        plot_overall_dentition_refined,
+        plot_abuse_by_dentition_facet_refined,
         analyze_dmft_by_dentition_with_pairwise,
         create_visualizations,
         plot_boxplot_with_dunn,
@@ -404,16 +406,36 @@ def main():
         t6_overall_dentition.to_csv(os.path.join(OUTPUT_DIR, f'table6_overall_dentition_posthoc_{timestamp}.csv'), index=False)
     
     # figure from table 6
-    plot_dmft_by_dentition_abuse(
-        df=df,
-        within_dentition_posthoc=t6_within_dentition,
-        within_abuse_posthoc=t6_within_abuse,
+    # plot_dmft_by_dentition_abuse(
+    #     df=df,
+    #     within_dentition_posthoc=t6_within_dentition,
+    #     within_abuse_posthoc=t6_within_abuse,
+    #     y_col='DMFT_Index',
+    #     show_points=True,
+    #     show_within_dentition_sig=True,   # 每个 dentition 内 abuse 间显著性
+    #     show_within_abuse_sig=False,      # 先不画 abuse 内 dentition 间显著性，避免太乱
+    #     figsize=(18, 9),
+    #     save_path=os.path.join(OUTPUT_DIR, f'figure_dmft_dentition_abuse_{timestamp}.png')
+    # )
+    
+    # --- 生成图 1：整体牙列对比 ---
+    # 传入 t6_overall_dentition 进行显著性标注
+    plot_overall_dentition_refined(
+        df=df, 
+        posthoc_df=t6_overall_dentition, 
         y_col='DMFT_Index',
-        show_points=True,
-        show_within_dentition_sig=True,   # 每个 dentition 内 abuse 间显著性
-        show_within_abuse_sig=False,      # 先不画 abuse 内 dentition 间显著性，避免太乱
-        figsize=(18, 9),
-        save_path=os.path.join(OUTPUT_DIR, f'figure_dmft_dentition_abuse_{timestamp}.png')
+        ylabel='Caries Experience',
+        save_path=os.path.join(OUTPUT_DIR, f'figure_overall_dentition_{timestamp}.png')
+    )
+
+    # --- 生成图 2：分阶段受虐对比 ---
+    # 传入 t6_within_dentition 进行显著性标注
+    plot_abuse_by_dentition_facet_refined(
+        df=df, 
+        posthoc_df=t6_within_dentition, 
+        y_col='DMFT_Index',
+        ylabel='Caries Experience',
+        save_path=os.path.join(OUTPUT_DIR, f'figure_abuse_by_dentition_facet_{timestamp}.png')
     )
 
     # Table 7 (year x abuse)
