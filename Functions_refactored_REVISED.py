@@ -719,7 +719,7 @@ def create_table4_multivariate_analysis(
         comparison_categories = ['Neglect', 'Emotional Abuse', 'Sexual Abuse']
 
     outcomes = [
-        ('has_caries', 'Caries Experience (DMFT>0)'),
+        ('has_caries', 'Caries Experience (>0)'),
         ('has_untreated_caries', 'Untreated Caries'),
     ]
 
@@ -1989,18 +1989,18 @@ def create_forest_plot_vertical(df_logistic, df_original, output_dir, timestamp,
         ax.errorbar(or_val, y, xerr=[[or_val - ci_low], [ci_up - or_val]], fmt='none', color=color, capsize=4, capthick=2, linewidth=2)
         ax.scatter(or_val, y, s=marker_size, c=color, marker=marker, edgecolors='white', linewidth=1.5)
         
-        ax.annotate(f"{or_val:.2f} ({ci_low:.2f}-{ci_up:.2f})", xy=(max(ci_up+0.1, 2.5), y), fontsize=9, va='center')
+        ax.annotate(f"{or_val:.2f} ({ci_low:.2f}-{ci_up:.2f})", xy=(max(ci_up+0.1, 2.5), y), fontsize=11, va='center')
         
     for outcome in outcome_order:
         positions = outcome_positions[outcome]
         if positions:
             mid_y = np.mean(positions)
-            ax.annotate(outcome, xy=(-0.3, mid_y), fontsize=11, fontweight='bold', va='center', ha='right', xycoords=('axes fraction', 'data'))
+            ax.annotate(outcome, xy=(-0.3, mid_y), fontsize=12, fontweight='bold', va='center', ha='right', xycoords=('axes fraction', 'data'))
             
     ax.set_yticks(y_positions)
-    ax.set_yticklabels(y_labels, fontsize=10)
+    ax.set_yticklabels(y_labels, fontsize=11)
     ax.invert_yaxis()
-    ax.set_xlabel('Odds Ratio (95% CI)', fontsize=12, fontweight='bold')
+    ax.set_xlabel('Odds Ratio (95% CI)', fontsize=14, fontweight='bold')
     ax.set_xlim(0, 4.5)
     ax.set_title('Adjusted Odds Ratios by Abuse Type', fontsize=14, fontweight='bold', pad=20)
     plt.tight_layout()
