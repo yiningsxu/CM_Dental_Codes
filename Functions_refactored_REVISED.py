@@ -1248,30 +1248,50 @@ def create_table5_5_caries_prevalence_treatment(df: pd.DataFrame):
     
     results = []
     
-    # 1. Prevalence (DMFT > 0)
+    # 1. Prevalence (DMFT > 0 and specific components)
     results.append({'Variable': '=== CARIES PREVALENCE ===', 'Category': '', **{a: '' for a in abuse_types}, 'Total': '', 'p-value': ''})
     
-    row_caries = {'Variable': 'Children with Caries', 'Category': 'DMFT_Index > 0'}
-    for abuse in abuse_types:
-        subset = df_local[df_local['abuse'] == abuse]
-        n_total = len(subset)
-        n_caries = (subset['DMFT_Index'] > 0).sum()
-        pct = (n_caries / n_total * 100) if n_total > 0 else 0
-        row_caries[abuse] = f"{n_caries}/{n_total} ({pct:.1f}%)"
+    # Ensure filled_total exists for the prevalence block if not explicitly passed
+    if 'filled_total' not in df_local.columns and 'Perm_F' in df_local.columns and 'Baby_f' in df_local.columns:
+        df_local['filled_total'] = df_local['Perm_F'].add(df_local['Baby_f'], fill_value=0)
+    if 'decayed_total' not in df_local.columns and 'Perm_D' in df_local.columns and 'Baby_d' in df_local.columns:
+        df_local['decayed_total'] = df_local['Perm_D'].add(df_local['Baby_d'], fill_value=0)
+    if 'missing_total' not in df_local.columns and 'Perm_M' in df_local.columns and 'Baby_m' in df_local.columns:
+        df_local['missing_total'] = df_local['Perm_M'].add(df_local['Baby_m'], fill_value=0)
+        
+    prevalence_vars = [
+        ('Children with Caries', 'DMFT_Index', 'DMFT_Index > 0'),
+        ('Untreated Caries (Decayed)', 'decayed_total', 'decayed_total > 0'),
+        ('Missing Teeth (Missing)', 'missing_total', 'missing_total > 0'),
+        ('Filled Teeth (Filled)', 'filled_total', 'filled_total > 0')
+    ]
     
-    n_total_all = len(df_local)
-    n_caries_all = (df_local['DMFT_Index'] > 0).sum()
-    pct_all = (n_caries_all / n_total_all * 100) if n_total_all > 0 else 0
-    row_caries['Total'] = f"{n_caries_all}/{n_total_all} ({pct_all:.1f}%)"
-    
-    df_local['has_caries'] = (df_local['DMFT_Index'] > 0).astype(int)
-    try:
-        contingency = pd.crosstab(df_local['abuse'], df_local['has_caries'])
-        chi2, p_val, _, _ = chi2_contingency(contingency)
-        row_caries['p-value'] = f"{p_val:.4f}" if p_val >= 0.0001 else "<0.0001"
-    except:
-        row_caries['p-value'] = 'N/A'
-    results.append(row_caries)
+    for var_label, var_col, var_cat in prevalence_vars:
+        if var_col not in df_local.columns:
+            continue
+            
+        row_prev = {'Variable': var_label, 'Category': var_cat}
+        for abuse in abuse_types:
+            subset = df_local[df_local['abuse'] == abuse]
+            n_total = len(subset)
+            n_prev = (subset[var_col] > 0).sum()
+            pct = (n_prev / n_total * 100) if n_total > 0 else 0
+            row_prev[abuse] = f"{n_prev}/{n_total} ({pct:.1f}%)"
+        
+        n_total_all = len(df_local)
+        n_prev_all = (df_local[var_col] > 0).sum()
+        pct_all = (n_prev_all / n_total_all * 100) if n_total_all > 0 else 0
+        row_prev['Total'] = f"{n_prev_all}/{n_total_all} ({pct_all:.1f}%)"
+        
+        df_local[f'has_{var_col}'] = (df_local[var_col] > 0).astype(int)
+        try:
+            contingency = pd.crosstab(df_local['abuse'], df_local[f'has_{var_col}'])
+            _, p_val, _, _ = chi2_contingency(contingency)
+            row_prev['p-value'] = f"{p_val:.4f}" if p_val >= 0.0001 else "<0.0001"
+        except:
+            row_prev['p-value'] = 'N/A'
+            
+        results.append(row_prev)
     
     # 2. Treatment Status
     results.append({'Variable': '=== TREATMENT STATUS ===', 'Category': '', **{a: '' for a in abuse_types}, 'Total': '', 'p-value': ''})
