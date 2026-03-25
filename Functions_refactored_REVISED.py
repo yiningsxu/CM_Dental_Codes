@@ -1973,7 +1973,7 @@ def plot_abuse_by_dentition_facet_refined(df, posthoc_df, y_col='DMFT_Index', xl
                         ax.text((x1+x2)/2, h + step*0.2, stars, ha='center', va='bottom', fontsize=tick_fontsize)
                     except ValueError: continue
 
-        # ax.set_title(dent.replace('_', ' ').title(), fontsize=title_fontsize, fontweight='bold', pad=15)
+        ax.set_title(dent.replace('_', ' ').title(), fontsize=title_fontsize, fontweight='bold', pad=15)
         ax.set_xticks(positions)
         ax.set_xticklabels(xtick_labels, rotation=0, fontsize=tick_fontsize, fontweight='bold')
         
