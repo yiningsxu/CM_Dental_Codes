@@ -158,6 +158,76 @@ def create_table1_demographics(df: pd.DataFrame) -> pd.DataFrame:
     
     return pd.DataFrame(results)
 
+def create_table1_1_demographics_by_dentition(df: pd.DataFrame) -> pd.DataFrame:
+    """Table 1.1: Demographics (Age) by Dentition Period and Abuse Type"""
+    df_local = df.copy()
+    abuse_types = list(df_local['abuse'].cat.categories) if pd.api.types.is_categorical_dtype(df_local['abuse']) else sorted(df_local['abuse'].dropna().unique())
+    dentition_order = ['primary_dentition', 'mixed_dentition', 'permanent_dentition']
+    
+    results = []
+
+    for dent_type in dentition_order:
+        df_dent = df_local[df_local['dentition_type'] == dent_type]
+        if len(df_dent) == 0:
+            continue
+            
+        # Total row
+        age_total = df_dent['age_year'].dropna()
+        if len(age_total) > 0:
+            mean = age_total.mean()
+            sd = age_total.std(ddof=1)
+            median = age_total.median()
+            q1 = age_total.quantile(0.25)
+            q3 = age_total.quantile(0.75)
+            min_val = age_total.min()
+            max_val = age_total.max()
+            
+            results.append({
+                'Dentition_Period': dent_type,
+                'Group': 'Total',
+                'N': len(age_total),
+                'Mean': round(mean, 2),
+                'SD': round(sd, 2),
+                'Median': round(median, 2),
+                'IQR': f"{q1:.2f}-{q3:.2f}",
+                'Min': round(min_val, 2),
+                'Max': round(max_val, 2),
+                'Mean±SD': f"{mean:.2f} ± {sd:.2f}" if pd.notna(sd) else f"{mean:.2f}",
+                'Median[IQR]': f"{median:.1f} [{q1:.1f}-{q3:.1f}]",
+                'Min-Max': f"{min_val:.1f}-{max_val:.1f}"
+            })
+            
+        # Abuse groups
+        for abuse in abuse_types:
+            age_sub = df_dent[df_dent['abuse'] == abuse]['age_year'].dropna()
+            if len(age_sub) == 0:
+                continue
+            
+            mean = age_sub.mean()
+            sd = age_sub.std(ddof=1)
+            median = age_sub.median()
+            q1 = age_sub.quantile(0.25)
+            q3 = age_sub.quantile(0.75)
+            min_val = age_sub.min()
+            max_val = age_sub.max()
+            
+            results.append({
+                'Dentition_Period': dent_type,
+                'Group': abuse,
+                'N': len(age_sub),
+                'Mean': round(mean, 2),
+                'SD': round(sd, 2),
+                'Median': round(median, 2),
+                'IQR': f"{q1:.2f}-{q3:.2f}",
+                'Min': round(min_val, 2),
+                'Max': round(max_val, 2),
+                'Mean±SD': f"{mean:.2f} ± {sd:.2f}" if pd.notna(sd) else f"{mean:.2f}",
+                'Median[IQR]': f"{median:.1f} [{q1:.1f}-{q3:.1f}]",
+                'Min-Max': f"{min_val:.1f}-{max_val:.1f}"
+            })
+            
+    return pd.DataFrame(results)
+
 def create_table2_oral_health_descriptive(df: pd.DataFrame):
     """Table 2: Descriptive Statistics for Oral Health
 
@@ -861,6 +931,159 @@ def create_table4_multivariate_analysis(
                     })
 
     return pd.DataFrame(results)
+
+def create_table5_1_dmft_by_dentition_abuse(df: pd.DataFrame):
+    """Table 5.1: DMFT by Dentition Period and Abuse Type"""
+    df_local = df.copy()
+    abuse_types = list(df_local['abuse'].cat.categories) if pd.api.types.is_categorical_dtype(df_local['abuse']) else sorted(df_local['abuse'].dropna().unique())
+    dentitions = df_local['dentition_type'].dropna().unique()
+    
+    # Sort dentitions
+    dentition_order = ['primary_dentition', 'mixed_dentition', 'permanent_dentition']
+    dentitions = [d for d in dentition_order if d in dentitions] + \
+                 [d for d in dentitions if d not in dentition_order]
+    
+    results = []
+    
+    for dentition in dentitions:
+        df_stage = df_local[df_local['dentition_type'] == dentition]
+        
+        groups = [df_stage[df_stage['abuse'] == abuse]['DMFT_Index'].dropna() 
+                  for abuse in abuse_types]
+        groups = [g for g in groups if len(g) > 0]
+        
+        if len(groups) >= 2:
+            try:
+                h_stat, p_kw = kruskal(*groups)
+                p_val_str = f"{p_kw:.4f}" if p_kw >= 0.0001 else "<0.0001"
+            except:
+                p_val_str = "N/A"
+        else:
+            p_val_str = "N/A"
+        
+        first_row = True
+        for abuse in abuse_types:
+            subset = df_stage[(df_stage['abuse'] == abuse)]['DMFT_Index'].dropna()
+            
+            if len(subset) == 0:
+                continue
+            
+            row = {
+                'Dentition_Type': dentition if first_row else '',
+                'Abuse_Type': abuse,
+                'N': len(subset),
+                'Mean': f"{subset.mean():.2f}",
+                'SD': f"{subset.std(ddof=1):.2f}" if len(subset)>1 else "N/A",
+                'Median': f"{subset.median():.1f}",
+                '25%': f"{subset.quantile(0.25):.1f}",
+                '75%': f"{subset.quantile(0.75):.1f}",
+                'Min': f"{subset.min():.0f}",
+                'Max': f"{subset.max():.0f}",
+                'p-value (KW)': p_val_str if first_row else ''
+            }
+            results.append(row)
+            first_row = False
+    
+    # Overall Summary
+    results.append({
+        'Dentition_Type': '=== OVERALL BY DENTITION PERIOD ===',
+        'Abuse_Type': '(Combined)',
+        'N': '---', 'Mean': '---', 'SD': '---', 'Median': '---',
+        '25%': '---', '75%': '---', 'Min': '---', 'Max': '---', 'p-value (KW)': '---'
+    })
+    
+    dentition_groups = [df_local[df_local['dentition_type'] == d]['DMFT_Index'].dropna() 
+                        for d in dentitions]
+    dentition_groups = [g for g in dentition_groups if len(g) > 0]
+    
+    if len(dentition_groups) >= 2:
+        try:
+            h_stat, p_kw_dentition = kruskal(*dentition_groups)
+            p_val_dentition_str = f"{p_kw_dentition:.4f}" if p_kw_dentition >= 0.0001 else "<0.0001"
+        except:
+            p_val_dentition_str = "N/A"
+    else:
+        p_val_dentition_str = "N/A"
+    
+    first_dentition = True
+    for dentition in dentitions:
+        subset = df_local[df_local['dentition_type'] == dentition]['DMFT_Index'].dropna()
+        if len(subset) > 0:
+            results.append({
+                'Dentition_Type': dentition,
+                'Abuse_Type': 'All abuse types',
+                'N': len(subset),
+                'Mean': f"{subset.mean():.2f}",
+                'SD': f"{subset.std(ddof=1):.2f}" if len(subset)>1 else "N/A",
+                'Median': f"{subset.median():.1f}",
+                '25%': f"{subset.quantile(0.25):.1f}",
+                '75%': f"{subset.quantile(0.75):.1f}",
+                'Min': f"{subset.min():.0f}",
+                'Max': f"{subset.max():.0f}",
+                'p-value (KW)': p_val_dentition_str if first_dentition else ''
+            })
+            first_dentition = False
+    
+    tidy_posthoc = []
+    # Post-hoc for dentition strata
+    for dentition in dentitions:
+        df_stage = df_local[df_local['dentition_type'] == dentition]
+        groups = [df_stage[df_stage['abuse'] == abuse]['DMFT_Index'].dropna() for abuse in abuse_types]
+        groups = [g for g in groups if len(g) > 0]
+        if len(groups) >= 2:
+            try:
+                _, p_kw = kruskal(*groups)
+                if p_kw < 0.05:
+                    dunn_adj, dunn_unadj = posthoc_dunn(df_stage, val_col='DMFT_Index', group_col='abuse', p_adjust='bonferroni')
+                    for i, abuse1 in enumerate(abuse_types):
+                        for abuse2 in abuse_types[i+1:]:
+                            if abuse1 in dunn_adj.index and abuse2 in dunn_adj.columns:
+                                tidy_posthoc.append({
+                                    'analysis_type': f'Table 5.1: {dentition}',
+                                    'variable': 'DMFT_Index',
+                                    'group1': abuse1,
+                                    'group2': abuse2,
+                                    'p_unadjusted': dunn_unadj.loc[abuse1, abuse2],
+                                    'p_adjusted': dunn_adj.loc[abuse1, abuse2],
+                                    'significant': dunn_adj.loc[abuse1, abuse2] < 0.05
+                                })
+            except: pass
+
+    # Post-hoc for overall dentition
+    if len(dentition_groups) >= 2 and 'p_kw_dentition' in locals() and p_kw_dentition < 0.05:
+        try:
+            dunn_adj, dunn_unadj = posthoc_dunn(df_local.dropna(subset=['dentition_type']), val_col='DMFT_Index', group_col='dentition_type', p_adjust='bonferroni')
+            for i, ls1 in enumerate(dentitions):
+                for ls2 in dentitions[i+1:]:
+                    if ls1 in dunn_adj.index and ls2 in dunn_adj.columns:
+                        tidy_posthoc.append({
+                            'analysis_type': 'Table 5.1: Dentition Period Overall',
+                            'variable': 'DMFT_Index',
+                            'group1': ls1,
+                            'group2': ls2,
+                            'p_unadjusted': dunn_unadj.loc[ls1, ls2],
+                            'p_adjusted': dunn_adj.loc[ls1, ls2],
+                            'significant': dunn_adj.loc[ls1, ls2] < 0.05
+                        })
+        except: pass
+
+    results.append({
+        'Dentition_Type': '=== POST-HOC pairwise (Dunn\'s) ===',
+        'Abuse_Type': '(Only if KW p < 0.05)',
+        'N': '', 'Mean': '', 'SD': '', 'Median': '', '25%': '', '75%': '', 'Min': '', 'Max': '', 'p-value (KW)': ''
+    })
+    
+    for tp in tidy_posthoc:
+        results.append({
+            'Dentition_Type': f"Post-hoc: {tp['analysis_type']}",
+            'Abuse_Type': f"{tp['group1']} vs {tp['group2']}",
+            'N': 'Sig' if tp['significant'] else 'n.s.',
+            'Mean': f"padj={tp['p_adjusted']:.4f}",
+            'SD': f"pun={tp['p_unadjusted']:.4f}",
+            'Median': '', '25%': '', '75%': '', 'Min': '', 'Max': '', 'p-value (KW)': ''
+        })
+
+    return pd.DataFrame(results), tidy_posthoc
 
 def create_table5_dmft_by_lifestage_abuse(df: pd.DataFrame):
     """Table 5: DMFT by Life Stage and Abuse Type"""

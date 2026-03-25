@@ -19,10 +19,12 @@ try:
     from Functions_refactored_REVISED import (
         save_value_counts_summary,
         create_table1_demographics,
+        create_table1_1_demographics_by_dentition,
         create_table2_oral_health_descriptive,
         create_table3_statistical_comparisons,
         create_table4_multivariate_analysis,
         create_forest_plot_vertical,
+        create_table5_1_dmft_by_dentition_abuse,
         create_table5_dmft_by_lifestage_abuse,
         create_table5_5_caries_prevalence_treatment,
         create_table6_dmft_by_dentition_abuse,
@@ -354,6 +356,10 @@ def main():
             table1_dent = create_table1_demographics(df_dent)
             table1_dent.to_csv(os.path.join(OUTPUT_DIR, f'table1_demographics_{dent_type}_{timestamp}.csv'), index=False)
 
+    # Table 1.1: Demographics by dentition period and abuse type
+    table1_1 = create_table1_1_demographics_by_dentition(df)
+    table1_1.to_csv(os.path.join(OUTPUT_DIR, f'table1_1_demographics_by_dentition_{timestamp}.csv'), index=False)
+
     # Table 2
     table2_cont, table2_cat = create_table2_oral_health_descriptive(df)
     table2_cont.to_csv(os.path.join(OUTPUT_DIR, f'table2_continuous_{timestamp}.csv'), index=False)
@@ -395,6 +401,10 @@ def main():
 
     # Forest plot for overall table 4
     create_forest_plot_vertical(table4_overall, df, OUTPUT_DIR, timestamp)
+
+    # Table 5.1
+    table5_1, table5_1_tidy = create_table5_1_dmft_by_dentition_abuse(df)
+    table5_1.to_csv(os.path.join(OUTPUT_DIR, f'table5_1_dmft_by_dentition_{timestamp}.csv'), index=False)
 
     # Table 5
     table5, t5_tidy = create_table5_dmft_by_lifestage_abuse(df)
