@@ -48,7 +48,7 @@ if (length(file_arg) > 0) {
 BASE_DIR <- normalizePath(file.path(SCRIPT_DIR, ".."), mustWork = FALSE)
 DATA_DIR <- file.path(BASE_DIR, "data")
 DATA_DESCRIPTION_OUTPUT_DIR <- file.path(DATA_DIR, "data_description")
-OUTPUT_DIR <- file.path(BASE_DIR, "result", timestamp)
+OUTPUT_DIR <- file.path(BASE_DIR, "OralHealth_tokyo/paper_analysis/result", timestamp)
 dir.create(DATA_DESCRIPTION_OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 message("OUTPUT_DIR: ", OUTPUT_DIR)
