@@ -9,7 +9,8 @@
 # -----------------------------
 # 0. Packages
 # -----------------------------
-required_packages <- c("dplyr", "tidyr", "ggplot2", "splines")
+# install.packages("logistf", repos = "https://cloud.r-project.org")
+required_packages <- c("dplyr", "tidyr", "ggplot2", "splines", "logistf")
 missing_packages <- character(0)
 for (pkg in required_packages) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
@@ -24,6 +25,7 @@ suppressPackageStartupMessages(library(dplyr))
 suppressPackageStartupMessages(library(tidyr))
 suppressPackageStartupMessages(library(ggplot2))
 suppressPackageStartupMessages(library(splines))
+suppressPackageStartupMessages(library(logistf))
 
 # Optional packages:
 # - PMCMRplus: Dunn post-hoc tests after Kruskal-Wallis.
@@ -45,16 +47,24 @@ if (length(file_arg) > 0) {
   SCRIPT_DIR <- getwd()
 }
 
+# BASE_DIR <- normalizePath(SCRIPT_DIR, mustWork = FALSE)
 BASE_DIR <- normalizePath(file.path(SCRIPT_DIR, ".."), mustWork = FALSE)
 DATA_DIR <- file.path(BASE_DIR, "data")
 DATA_DESCRIPTION_OUTPUT_DIR <- file.path(DATA_DIR, "data_description")
-OUTPUT_DIR <- file.path(BASE_DIR, "OralHealth_tokyo/paper_analysis/result", timestamp)
+OUTPUT_DIR <- file.path(BASE_DIR, "result", timestamp)
+
 dir.create(DATA_DESCRIPTION_OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+message("SCRIPT_DIR: ", SCRIPT_DIR)
+message("BASE_DIR: ", BASE_DIR)
+message("DATA_DIR: ", DATA_DIR)
 message("OUTPUT_DIR: ", OUTPUT_DIR)
 
 ORIGINAL_DATA_NAME <- "analysisData_20260211"
 ORIGINAL_DATA_PATH <- file.path(DATA_DIR, paste0(ORIGINAL_DATA_NAME, ".csv"))
+message("ORIGINAL_DATA_PATH: ", ORIGINAL_DATA_PATH)
+
 END_DATE <- as.Date("2024-03-31")
 target_abuse_types <- c("Physical Abuse", "Neglect", "Emotional Abuse", "Sexual Abuse")
 SUBJECT_ID_COL_CANDIDATES <- c("No_All", "child_id", "subject_id", "case_id", "ID", "id")
@@ -202,6 +212,12 @@ write.csv(data_description, file.path(DATA_DESCRIPTION_OUTPUT_DIR, paste0(ORIGIN
 
 # -----------------------------
 # 4. Filtering and study-flow accounting
+# Loaded raw	2480
+# Date <= 2024-03-31	2162
+# Target maltreatment (abuse in 4 types) & abuse_num>=1	1305
+# Single-type only (abuse_num==1)	1235
+# Multi-type excluded (abuse_num>1)	70
+# Deduplicated to first exam per No_All	1235
 # -----------------------------
 message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Filtering data...")
 
@@ -408,10 +424,11 @@ if ("date" %in% names(df)) {
 write.csv(df, file.path(DATA_DIR, paste0(csv_name, "_with_derived_variables.csv")), row.names = FALSE)
 
 # Compact profile of excluded multi-type cases, using direct replicated derivation.
-if ("abuse_num" %in% names(df_all)) {
-  df_multi <- df_all[df_all$abuse_num > 1, , drop = FALSE]
+if ("abuse_num" %in% names(data0)) {
+  df_multi <- data0[data0$abuse_num != 1, , drop = FALSE]
   if (nrow(df_multi) > 0) {
     df_multi_prof <- df_multi
+    write.csv(df_multi_prof, file.path(DATA_DIR, paste0(csv_name, "_multi_type_profile.csv")), row.names = FALSE)
     if ("age_year" %in% names(df_multi_prof)) {
       df_multi_prof$age_group <- cut(df_multi_prof$age_year, breaks = c(0, 6, 12, 18), labels = c("Early Childhood (2-6)", "Middle Childhood (7-12)", "Adolescence (13-18)"), right = TRUE, include.lowest = TRUE)
     }
