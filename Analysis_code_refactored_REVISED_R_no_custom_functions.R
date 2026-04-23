@@ -102,6 +102,18 @@ if ("abuse" %in% names(data0)) {
   data0$abuse <- factor(data0$abuse, levels = c("Physical Abuse", "Neglect", "Emotional Abuse", "Sexual Abuse", "Delinquency", "Parenting Difficulties", "Others"), ordered = TRUE)
 }
 
+if ("abuse_1" %in% names(data0)) {
+  data0$abuse_1 <- as.character(data0$abuse_1)
+  data0$abuse_1[data0$abuse_1 == "1"] <- "Physical Abuse"
+  data0$abuse_1[data0$abuse_1 == "2"] <- "Neglect"
+  data0$abuse_1[data0$abuse_1 == "3"] <- "Emotional Abuse"
+  data0$abuse_1[data0$abuse_1 == "4"] <- "Sexual Abuse"
+  data0$abuse_1[data0$abuse_1 == "5"] <- "Delinquency"
+  data0$abuse_1[data0$abuse_1 == "6"] <- "Parenting Difficulties"
+  data0$abuse_1[data0$abuse_1 == "7"] <- "Others"
+  data0$abuse_1 <- factor(data0$abuse_1, levels = c("Physical Abuse", "Neglect", "Emotional Abuse", "Sexual Abuse", "Delinquency", "Parenting Difficulties", "Others"), ordered = TRUE)
+}
+
 if ("occlusalRelationship" %in% names(data0)) {
   data0$occlusalRelationship <- as.character(data0$occlusalRelationship)
   data0$occlusalRelationship[data0$occlusalRelationship == "1"] <- "Normal Occlusion"
