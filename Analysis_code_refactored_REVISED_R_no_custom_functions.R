@@ -48,7 +48,9 @@ if (length(file_arg) > 0) {
 }
 
 # BASE_DIR <- normalizePath(SCRIPT_DIR, mustWork = FALSE)
-BASE_DIR <- normalizePath(file.path(SCRIPT_DIR, ".."), mustWork = FALSE)
+BASE_DIR <- "/Users/ayo/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analysis"
+
+# BASE_DIR <- normalizePath(file.path(SCRIPT_DIR, ".."), mustWork = FALSE)
 DATA_DIR <- file.path(BASE_DIR, "data")
 DATA_DESCRIPTION_OUTPUT_DIR <- file.path(DATA_DIR, "data_description")
 OUTPUT_DIR <- file.path(BASE_DIR, "result", timestamp)
@@ -1141,6 +1143,199 @@ if (nrow(table4_overall) > 0) {
     }
   }
 }
+
+# -----------------------------
+# Forest plot for overall Table 4: Japanese version
+# -----------------------------
+
+# -----------------------------
+# 1. Forest plot用データ整形
+# -----------------------------
+forest_df <- table4_overall %>%
+  filter(`Odds Ratio` != "N/A", `95% CI` != "N/A") %>%
+  mutate(
+    OR = suppressWarnings(as.numeric(`Odds Ratio`)),
+    CI_lower = suppressWarnings(as.numeric(sub("^\\(([^-]+)-.*$", "\\1", `95% CI`))),
+    CI_upper = suppressWarnings(as.numeric(sub("^\\([^-]+-([^)]+)\\)$", "\\1", `95% CI`))),
+    p_num = ifelse(
+      grepl("^<", `p-value`),
+      as.numeric(sub("^<", "", `p-value`)),
+      suppressWarnings(as.numeric(`p-value`))
+    )
+  ) %>%
+  filter(!is.na(OR), !is.na(CI_lower), !is.na(CI_upper))
+
+# -----------------------------
+# 2. 日本語ラベル
+# -----------------------------
+outcome_jp_map <- c(
+  "Caries Experience (>0)" = "う蝕経験あり",
+  "Untreated Caries"       = "未処置う蝕あり",
+  "Gingivitis"             = "歯肉炎あり",
+  "Treatment Need"         = "要治療"
+)
+
+comparison_short_map <- c(
+  "Neglect vs Physical Abuse"         = "Neglect",
+  "Emotional Abuse vs Physical Abuse" = "Emotional Abuse",
+  "Sexual Abuse vs Physical Abuse"    = "Sexual Abuse"
+)
+
+comparison_jp_map <- c(
+  "Neglect"         = "ネグレクト",
+  "Emotional Abuse" = "心理的虐待",
+  "Sexual Abuse"    = "性的虐待"
+)
+
+n_map <- c(
+  "Neglect" = 328,
+  "Emotional Abuse" = 201,
+  "Sexual Abuse" = 60
+)
+
+forest_df <- forest_df %>%
+  mutate(
+    Outcome_jp = outcome_jp_map[Outcome],
+    Comp_short = comparison_short_map[Comparison],
+    Comp_jp = comparison_jp_map[Comp_short],
+    n_group = n_map[Comp_short],
+    y_label = paste0(Comp_jp, "\n(n=", n_group, ")"),
+    OR_CI_text = sprintf("%.2f (%.2f-%.2f)", OR, CI_lower, CI_upper),
+    sig_shape = ifelse(!is.na(p_num) & p_num < 0.05, "sig", "ns")
+  )
+
+# -----------------------------
+# 3. 並び順
+# -----------------------------
+outcome_order <- c(
+  "う蝕経験あり",
+  "未処置う蝕あり",
+  "歯肉炎あり",
+  "要治療"
+)
+
+comp_order <- c("ネグレクト", "心理的虐待", "性的虐待")
+
+forest_df <- forest_df %>%
+  mutate(
+    Outcome_jp = factor(Outcome_jp, levels = outcome_order),
+    Comp_jp = factor(Comp_jp, levels = comp_order)
+  ) %>%
+  arrange(Outcome_jp, Comp_jp)
+
+# -----------------------------
+# 4. y座標
+# -----------------------------
+y_positions <- c(15, 14, 13,   11, 10, 9,   7, 6, 5,   3, 2, 1)
+forest_df$y <- y_positions[1:nrow(forest_df)]
+
+group_centers <- forest_df %>%
+  group_by(Outcome_jp) %>%
+  summarise(y_center = mean(y), .groups = "drop")
+
+# -----------------------------
+# 5. 色と形
+# -----------------------------
+comp_color_map <- c(
+  "ネグレクト" = "#E69F00",
+  "心理的虐待" = "#56B4E9",
+  "性的虐待"   = "#009E73"
+)
+
+shape_map <- c(
+  "sig" = 15,
+  "ns"  = 16
+)
+
+# -----------------------------
+# 6. プロット
+# -----------------------------
+p_forest_jp <- ggplot(forest_df, aes(x = OR, y = y)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "black", linewidth = 0.7) +
+
+  geom_errorbarh(
+    aes(xmin = CI_lower, xmax = CI_upper, color = Comp_jp),
+    height = 0.10,
+    linewidth = 1.0
+  ) +
+
+  geom_point(
+    aes(color = Comp_jp, shape = sig_shape),
+    size = 3.5
+  ) +
+
+  geom_text(
+    aes(x = 2.95, label = OR_CI_text),
+    hjust = 0,
+    size = 4.6,
+    color = "black"
+  ) +
+
+  # 左側のOutcome見出し
+  geom_text(
+    data = group_centers,
+    aes(x = -1.35, y = y_center, label = Outcome_jp),
+    inherit.aes = FALSE,
+    hjust = 1,
+    fontface = "bold",
+    size = 5.8
+  ) +
+
+  scale_color_manual(values = comp_color_map, guide = "none") +
+  scale_shape_manual(values = shape_map, guide = "none") +
+
+  scale_y_continuous(
+    breaks = forest_df$y,
+    labels = forest_df$y_label,
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+
+  # ★ limits を消す
+  scale_x_continuous(
+    breaks = seq(0, 4.5, by = 0.5),
+    expand = c(0, 0)
+  ) +
+
+  # ★ xlim をここで指定
+  coord_cartesian(xlim = c(0, 4.5), clip = "off") +
+
+  labs(
+    x = "オッズ比（95%信頼区間）",
+    y = NULL
+  ) +
+
+  theme_minimal(base_family = "Hiragino Sans") +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background  = element_rect(fill = "transparent", color = NA),
+
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.8),
+
+    axis.text.y = element_text(size = 10.5, color = "black"),
+    axis.text.x = element_text(size = 11, color = "black"),
+    axis.title.x = element_text(size = 15, face = "bold", color = "black"),
+
+    plot.margin = margin(t = 20, r = 180, b = 20, l = 240)
+  )
+
+p_forest_jp <- p_forest_jp +
+  theme(
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background  = element_rect(fill = "transparent", color = NA)
+  )
+
+ggsave(
+  file.path(OUTPUT_DIR, paste0("figure_forest_plot_japanese_style_transparent_", timestamp, ".png")),
+  p_forest_jp,
+  width = 11,
+  height = 10,
+  dpi = 300,
+  bg = "transparent"
+)
 
 # -----------------------------
 # 11. Table 5.1 and Table 6: DMFT by dentition and abuse type
