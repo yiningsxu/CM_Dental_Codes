@@ -36,8 +36,8 @@ if (length(file_arg) > 0) {
   }
 }
 
-DATA_PATH <- file.path(BASE_DIR, "data", "analysisData_20260211_AllData_cleaned.csv")
-OUT_DIR <- file.path(BASE_DIR, "result", paste0("paper_like_kvist2018_", format(Sys.Date(), "%Y%m%d")))
+DATA_PATH <- file.path(BASE_DIR, "paper_analysis","data", "analysisData_20260211_AllData_cleaned.csv")
+OUT_DIR <- file.path(BASE_DIR,"paper_analysis","result", paste0("paper_like_kvist2018_", format(Sys.Date(), "%Y%m%d")))
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 format_p <- function(p) {
@@ -49,7 +49,7 @@ format_p <- function(p) {
 mean_sd <- function(x) {
   x <- x[!is.na(x)]
   if (length(x) == 0) return("N/A")
-  sprintf("%.2f +/- %.2f", mean(x), sd(x))
+  sprintf("%.2f ± %.2f", mean(x), sd(x))
 }
 
 median_iqr <- function(x) {
@@ -167,7 +167,7 @@ if (!file.exists(DATA_PATH)) {
 data0 <- read.csv(DATA_PATH, stringsAsFactors = FALSE, na.strings = c("", "NA", "NaN"))
 message("Loaded: ", DATA_PATH)
 message("Rows x columns: ", nrow(data0), " x ", ncol(data0))
-
+# 2480 x 81
 
 # -----------------------------
 # 2. カテゴリ変数の再コード化
@@ -281,17 +281,17 @@ for (tc in c(perm_cols, primary_cols)) {
 if (length(perm_cols) > 0) {
   pm <- data0[, perm_cols, drop = FALSE]
   pm_all_missing <- rowSums(!is.na(pm)) == 0
-  data0$Perm_D <- rowSums(pm == 3, na.rm = TRUE)
-  data0$Perm_M <- rowSums(pm == 4, na.rm = TRUE)
-  data0$Perm_F <- rowSums(pm == 1, na.rm = TRUE)
-  data0$Perm_C0 <- rowSums(pm == 2, na.rm = TRUE)
-  data0$Perm_sound <- rowSums(pm == 0, na.rm = TRUE)
-  data0$Perm_trauma <- rowSums(pm == 7, na.rm = TRUE)
-  data0$Perm_congenital_missing <- rowSums(pm == 6, na.rm = TRUE)
-  data0$Perm_recorded_teeth <- rowSums(!is.na(pm) & !(pm %in% c(-1, 6)), na.rm = TRUE)
-  data0$Perm_DMFT <- data0$Perm_D + data0$Perm_M + data0$Perm_F
+  data0$Perm_D <- rowSums(pm == 3, na.rm = TRUE) # 未処置う蝕歯数
+  data0$Perm_M <- rowSums(pm == 4, na.rm = TRUE) # 喪失歯数
+  data0$Perm_F <- rowSums(pm == 1, na.rm = TRUE) # 処置歯数
+  data0$Perm_C0 <- rowSums(pm == 2, na.rm = TRUE) # C0歯数
+  data0$Perm_sound <- rowSums(pm == 0, na.rm = TRUE) # 健全歯数
+  data0$Perm_trauma <- rowSums(pm == 7, na.rm = TRUE) # 歯牙破折歯数
+  data0$Perm_congenital_missing <- rowSums(pm == 6, na.rm = TRUE) # 先天性欠損歯数
+  data0$Perm_recorded_teeth <- rowSums(!is.na(pm) & !(pm %in% c(-1, 6)), na.rm = TRUE) # 記録された歯の総数(記録なし、未萌出、先天性欠損歯を除く)
+  data0$Perm_DMFT <- data0$Perm_D + data0$Perm_M + data0$Perm_F # 永久歯のDMFT
   for (v in c("Perm_D","Perm_M","Perm_F","Perm_C0","Perm_sound","Perm_trauma","Perm_congenital_missing","Perm_recorded_teeth","Perm_DMFT")) {
-    data0[[v]][pm_all_missing] <- NA_real_
+    data0[[v]][pm_all_missing] <- NA_real_ # 永久歯データがすべてNAの場合、NAとして処理
   }
 } else {
   data0$Perm_D <- data0$Perm_M <- data0$Perm_F <- data0$Perm_C0 <- NA_real_
@@ -308,9 +308,9 @@ if (length(primary_cols) > 0) {
   data0$Primary_C0 <- rowSums(bm == 2, na.rm = TRUE)
   data0$Primary_sound <- rowSums(bm == 0, na.rm = TRUE)
   data0$Primary_trauma <- rowSums(bm == 7, na.rm = TRUE)
-  data0$Primary_retained <- rowSums(bm == 8, na.rm = TRUE)
-  data0$Primary_fused <- rowSums(bm == 9, na.rm = TRUE)
-  data0$Primary_congenital_missing <- rowSums(bm == 6, na.rm = TRUE)
+  data0$Primary_retained <- rowSums(bm == 8, na.rm = TRUE) # 晩期残存歯数
+  data0$Primary_fused <- rowSums(bm == 9, na.rm = TRUE) # 癒合歯数
+  data0$Primary_congenital_missing <- rowSums(bm == 6, na.rm = TRUE) # 先天性欠損歯数
   data0$Primary_recorded_teeth <- rowSums(!is.na(bm) & !(bm %in% c(-1, 6)), na.rm = TRUE)
   data0$Primary_dmft <- data0$Primary_d + data0$Primary_m + data0$Primary_f
   for (v in c("Primary_d","Primary_m","Primary_f","Primary_C0","Primary_sound","Primary_trauma","Primary_retained","Primary_fused","Primary_congenital_missing","Primary_recorded_teeth","Primary_dmft")) {
