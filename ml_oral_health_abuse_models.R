@@ -12,6 +12,8 @@
 #   - Logistic regression: 解釈しやすいベースライン
 #   - Elastic-net logistic regression: 相関の強い歯科指標を正則化して扱う
 #   - Random forest: 非線形・交互作用を拾う木系モデル
+#   - Bagged decision trees: bootstrapで作った複数の木を平均する
+#   - AdaBoost stumps: 誤分類例に重みを置いて弱学習器を逐次的に組み合わせる
 #   - Decision tree: 単純なルールとして見やすい補助モデル
 #
 # 出力:
@@ -630,6 +632,171 @@ run_binary_ml_task <- function(df, outcome_col, task_name, positive_label, featu
       }
     }
 
+    # Bagged decision trees.
+    # Random forestとは異なり、各木で特徴量のランダムサブセットを使わず、
+    # bootstrap標本から作った複数の決定木の予測確率を単純平均する。
+    if (has_rpart) {
+      n_bag <- 150
+      prob_train_mat <- matrix(NA_real_, nrow = length(y_train), ncol = n_bag)
+      prob_test_mat <- matrix(NA_real_, nrow = length(y_test), ncol = n_bag)
+      bag_importance <- list()
+      successful_trees <- 0
+      for (b in seq_len(n_bag)) {
+        boot_idx <- sample(seq_along(y_train), size = length(y_train), replace = TRUE)
+        bag_train <- data.frame(
+          y = factor(ifelse(y_train[boot_idx] == 1, "Positive", "Negative"), levels = c("Negative", "Positive")),
+          x_train[boot_idx, , drop = FALSE],
+          check.names = FALSE
+        )
+        fit_bag <- try(
+          rpart::rpart(
+            y ~ ., data = bag_train, method = "class",
+            weights = w_train[boot_idx],
+            control = rpart::rpart.control(cp = 0.001, minbucket = 15, maxdepth = 6)
+          ),
+          silent = TRUE
+        )
+        if (!inherits(fit_bag, "try-error")) {
+          successful_trees <- successful_trees + 1
+          prob_train_mat[, successful_trees] <- as.numeric(
+            predict(fit_bag, data.frame(x_train, check.names = FALSE), type = "prob")[, "Positive"]
+          )
+          prob_test_mat[, successful_trees] <- as.numeric(
+            predict(fit_bag, data.frame(x_test, check.names = FALSE), type = "prob")[, "Positive"]
+          )
+          if (!is.null(fit_bag$variable.importance)) {
+            bag_importance[[length(bag_importance) + 1]] <- fit_bag$variable.importance
+          }
+        }
+      }
+      if (successful_trees > 0) {
+        prob_train <- rowMeans(prob_train_mat[, seq_len(successful_trees), drop = FALSE], na.rm = TRUE)
+        prob_test <- rowMeans(prob_test_mat[, seq_len(successful_trees), drop = FALSE], na.rm = TRUE)
+        threshold <- choose_threshold(y_train, prob_train)
+        perf <- metrics_at_threshold(y_test, prob_test, threshold)
+        perf <- cbind(
+          Task = task_name, Feature_Set = feature_set_name,
+          Model = "Bagged decision trees", N_train = length(y_train),
+          N_test = length(y_test), Positive_Label = positive_label, perf
+        )
+        all_perf[[length(all_perf) + 1]] <- perf
+
+        if (length(bag_importance) > 0) {
+          all_names <- sort(unique(unlist(lapply(bag_importance, names))))
+          imp_sum <- setNames(rep(0, length(all_names)), all_names)
+          for (imp in bag_importance) {
+            imp_sum[names(imp)] <- imp_sum[names(imp)] + as.numeric(imp)
+          }
+          imp_df <- data.frame(
+            Feature = names(imp_sum),
+            Importance = as.numeric(imp_sum) / successful_trees,
+            Trees = successful_trees,
+            row.names = NULL
+          )
+          imp_df <- imp_df[order(imp_df$Importance, decreasing = TRUE), , drop = FALSE]
+          write.csv(imp_df, file.path(feature_dir, "bagged_trees_importance.csv"), row.names = FALSE)
+        }
+
+        all_predictions[[length(all_predictions) + 1]] <- data.frame(
+          Task = task_name, Feature_Set = feature_set_name,
+          Model = "Bagged decision trees", Row_Index = test_idx,
+          Truth = y_test, Probability = prob_test,
+          Prediction = as.integer(prob_test >= threshold),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+
+    # AdaBoost with decision stumps.
+    # 1段の決定木を弱学習器として使い、誤分類された症例の重みを増やしながら
+    # 逐次的に学習器を追加する。最終的には重み付き多数決を確率へ変換する。
+    if (has_rpart) {
+      n_boost <- 150
+      y_signed <- ifelse(y_train == 1, 1, -1)
+      obs_w <- class_weights(y_train)
+      obs_w <- obs_w / sum(obs_w)
+      boost_alpha <- numeric(0)
+      boost_train_pred <- list()
+      boost_test_pred <- list()
+      boost_importance <- list()
+
+      for (b in seq_len(n_boost)) {
+        boost_train <- data.frame(
+          y = factor(ifelse(y_train == 1, "Positive", "Negative"), levels = c("Negative", "Positive")),
+          x_train,
+          check.names = FALSE
+        )
+        fit_boost <- try(
+          rpart::rpart(
+            y ~ ., data = boost_train, method = "class",
+            weights = obs_w,
+            control = rpart::rpart.control(cp = 0, minbucket = 10, maxdepth = 1)
+          ),
+          silent = TRUE
+        )
+        if (inherits(fit_boost, "try-error")) next
+        pred_train_class <- predict(fit_boost, boost_train, type = "class")
+        pred_train_signed <- ifelse(pred_train_class == "Positive", 1, -1)
+        err <- sum(obs_w[pred_train_signed != y_signed])
+        if (!is.finite(err) || err >= 0.5) next
+        err <- max(err, 1e-6)
+        alpha <- 0.5 * log((1 - err) / err)
+        obs_w <- obs_w * exp(-alpha * y_signed * pred_train_signed)
+        obs_w <- obs_w / sum(obs_w)
+
+        pred_test_class <- predict(fit_boost, data.frame(x_test, check.names = FALSE), type = "class")
+        boost_alpha <- c(boost_alpha, alpha)
+        boost_train_pred[[length(boost_train_pred) + 1]] <- pred_train_signed
+        boost_test_pred[[length(boost_test_pred) + 1]] <- ifelse(pred_test_class == "Positive", 1, -1)
+        if (!is.null(fit_boost$variable.importance)) {
+          boost_importance[[length(boost_importance) + 1]] <- fit_boost$variable.importance * alpha
+        }
+      }
+
+      if (length(boost_alpha) > 0) {
+        train_score <- rep(0, length(y_train))
+        test_score <- rep(0, length(y_test))
+        for (b in seq_along(boost_alpha)) {
+          train_score <- train_score + boost_alpha[b] * boost_train_pred[[b]]
+          test_score <- test_score + boost_alpha[b] * boost_test_pred[[b]]
+        }
+        prob_train <- 1 / (1 + exp(-2 * train_score))
+        prob_test <- 1 / (1 + exp(-2 * test_score))
+        threshold <- choose_threshold(y_train, prob_train)
+        perf <- metrics_at_threshold(y_test, prob_test, threshold)
+        perf <- cbind(
+          Task = task_name, Feature_Set = feature_set_name,
+          Model = "AdaBoost stumps", N_train = length(y_train),
+          N_test = length(y_test), Positive_Label = positive_label, perf
+        )
+        all_perf[[length(all_perf) + 1]] <- perf
+
+        if (length(boost_importance) > 0) {
+          all_names <- sort(unique(unlist(lapply(boost_importance, names))))
+          imp_sum <- setNames(rep(0, length(all_names)), all_names)
+          for (imp in boost_importance) {
+            imp_sum[names(imp)] <- imp_sum[names(imp)] + as.numeric(imp)
+          }
+          imp_df <- data.frame(
+            Feature = names(imp_sum),
+            Importance = as.numeric(imp_sum),
+            Learners = length(boost_alpha),
+            row.names = NULL
+          )
+          imp_df <- imp_df[order(imp_df$Importance, decreasing = TRUE), , drop = FALSE]
+          write.csv(imp_df, file.path(feature_dir, "adaboost_importance.csv"), row.names = FALSE)
+        }
+
+        all_predictions[[length(all_predictions) + 1]] <- data.frame(
+          Task = task_name, Feature_Set = feature_set_name,
+          Model = "AdaBoost stumps", Row_Index = test_idx,
+          Truth = y_test, Probability = prob_test,
+          Prediction = as.integer(prob_test >= threshold),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+
     # Decision tree.
     if (has_rpart) {
       tree_train <- data.frame(
@@ -748,6 +915,8 @@ notes <- c(
   "- Logistic regression.",
   if (has_glmnet) "- Elastic-net logistic regression (glmnet)." else "- Elastic-net logistic regression skipped because glmnet is not installed.",
   if (has_randomForest) "- Random forest (randomForest)." else "- Random forest skipped because randomForest is not installed.",
+  if (has_rpart) "- Bagged decision trees (rpart bootstrap ensemble)." else "- Bagged decision trees skipped because rpart is not installed.",
+  if (has_rpart) "- AdaBoost stumps (custom implementation with rpart stumps)." else "- AdaBoost skipped because rpart is not installed.",
   if (has_rpart) "- Decision tree (rpart)." else "- Decision tree skipped because rpart is not installed.",
   "",
   "Main output files:",
