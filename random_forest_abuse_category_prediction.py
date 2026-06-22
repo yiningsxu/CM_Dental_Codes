@@ -108,15 +108,15 @@ DERIVED_ORAL_FEATURES = [
 ]
 
 CLINICAL_FEATURES = [
-    "needTOBEtreated",
-    "emergency",
-    "emergencyInMonths",
+    # "needTOBEtreated",
+    # "emergency",
+    # "emergencyInMonths",
     "gingivitis",
     "occlusalRelationship",
-    "habits",
+    # "habits",
     "OralCleanStatus",
-    "Orthodontics",
-    # # "dentists",
+    # "Orthodontics",
+    # "dentists",
     # "dental_hygienist",
 ]
 
