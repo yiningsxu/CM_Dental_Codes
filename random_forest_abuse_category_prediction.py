@@ -52,6 +52,65 @@ except ModuleNotFoundError as exc:
     ) from exc
 
 
+NUMERIC_FEATURES = {
+    "age",
+    "age_year",
+    "age_month",
+    "Perm_D",
+    "Perm_M",
+    "Perm_F",
+    "Perm_Sound",
+    "Perm_C0",
+    "Perm_total_teeth",
+    "Perm_DMFT",
+    "Perm_DMFT_C0",
+    "Perm_sound_rate",
+    "Baby_d",
+    "Baby_m",
+    "Baby_f",
+    "Baby_sound",
+    "Baby_C0",
+    "Baby_total_teeth",
+    "Baby_DMFT",
+    "Baby_DMFT_C0",
+    "Baby_sound_rate",
+    "DMFT_Index",
+    "DMFT_C0",
+    "C0_Count",
+    "filled_total",
+    "decayed_total",
+    "missing_total",
+    "Care_Index",
+    "UTN_Score",
+    "total_teeth",
+    "Healthy_Rate",
+    "Present_Teeth",
+    "Present_Perm_Teeth",
+    "Present_Baby_Teeth",
+}
+
+CATEGORICAL_FEATURES = {
+    "sex",
+    "CGC",
+    "year",
+    "has_caries",
+    "has_untreated_caries",
+    "dentition_type",
+    "gingivitis",
+    "occlusalRelationship",
+    "OralCleanStatus",
+    "wake_up",
+    "breakfast",
+    "morning_brushing",
+    "school",
+    "bedtime",
+    "night_brushing",
+    "TV",
+    "game",
+    "meal",
+    "extra_lesson",
+}
+
 TARGET_CLASSES = [
     "Physical Abuse",
     "Neglect",
@@ -137,6 +196,7 @@ DEMOGRAPHIC_FEATURES = [
     # "age_year",
     # "age_month",
     "sex",
+    "age",
     # "CGC",
     # "year",
 ]
@@ -150,7 +210,6 @@ TARGET_LEAKAGE_COLUMNS = {
 ID_OR_TEXT_COLUMNS = {
     "No_All",
     "date",
-    "age",
     "instruction_detail",
     "instruction",
     "memo",
@@ -299,12 +358,15 @@ def build_feature_sets(df: pd.DataFrame) -> dict[str, list[str]]:
 
 
 def split_columns(df: pd.DataFrame, feature_cols: list[str]) -> tuple[list[str], list[str]]:
-    categorical_cols = []
     numeric_cols = []
+    categorical_cols = []
 
     for col in feature_cols:
-        series = df[col]
-        if pd.api.types.is_numeric_dtype(series):
+        if col in NUMERIC_FEATURES:
+            numeric_cols.append(col)
+        elif col in CATEGORICAL_FEATURES:
+            categorical_cols.append(col)
+        elif pd.api.types.is_numeric_dtype(df[col]):
             numeric_cols.append(col)
         else:
             categorical_cols.append(col)
@@ -328,7 +390,7 @@ def make_pipeline(
 
     numeric_pipeline = Pipeline(
         steps=[
-            ("imputer", SimpleImputer(strategy="median")),
+            ("imputer", SimpleImputer(strategy="constant", fill_value="Missing")),
         ]
     )
     categorical_pipeline = Pipeline(
