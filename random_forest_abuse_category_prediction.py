@@ -134,11 +134,11 @@ BEHAVIOR_FEATURES = [
 ]
 
 DEMOGRAPHIC_FEATURES = [
-    "age_year",
-    "age_month",
+    # "age_year",
+    # "age_month",
     "sex",
-    "CGC",
-    "year",
+    # "CGC",
+    # "year",
 ]
 
 TARGET_LEAKAGE_COLUMNS = {
