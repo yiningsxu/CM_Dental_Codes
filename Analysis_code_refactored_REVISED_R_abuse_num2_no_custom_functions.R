@@ -1,5 +1,6 @@
 # ============================================================================
 # Refactored Analysis Code (REVISED) - R procedural version
+# Variant: main analysis restricted to double-type records (abuse_num == 2).
 # Converted from the uploaded Python analysis scripts.
 # This version avoids user-defined/custom R functions and does not source a
 # separate functions file. The workflow is written as direct, line-by-line code
@@ -31,8 +32,7 @@ suppressPackageStartupMessages(library(logistf))
 # - PMCMRplus: Dunn post-hoc tests after Kruskal-Wallis.
 # - logistf: Firth logistic regression fallback when glm has numerical problems.
 has_PMCMRplus <- requireNamespace("PMCMRplus", quietly = TRUE)
-has_logistf <- requireNamespace("
-logistf", quietly = TRUE)
+has_logistf <- requireNamespace("logistf", quietly = TRUE)
 
 timestamp <- format(Sys.Date(), "%Y%m%d")
 message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Starting Analysis...")
@@ -54,7 +54,7 @@ BASE_DIR <- "/Users/yining/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analy
 # BASE_DIR <- normalizePath(file.path(SCRIPT_DIR, ".."), mustWork = FALSE)
 DATA_DIR <- file.path(BASE_DIR, "data")
 DATA_DESCRIPTION_OUTPUT_DIR <- file.path(DATA_DIR, "data_description")
-OUTPUT_DIR <- file.path(BASE_DIR, "result", timestamp)
+OUTPUT_DIR <- file.path(BASE_DIR, "result", paste0(timestamp, "_abuse_num2"))
 
 dir.create(DATA_DESCRIPTION_OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
@@ -230,9 +230,9 @@ write.csv(data_description, file.path(DATA_DESCRIPTION_OUTPUT_DIR, paste0(ORIGIN
 # Loaded raw	2480
 # Date <= 2024-03-31	2162
 # Target maltreatment (abuse in 4 types) & abuse_num>=1	1305
-# Single-type only (abuse_num==1)	1235
-# Multi-type excluded (abuse_num>1)	70
-# Deduplicated to first exam per No_All	1235
+# Double-type only (abuse_num==2)
+# Other abuse_num values excluded from the main analysis
+# Deduplicated to first exam per No_All
 # -----------------------------
 message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Filtering data...")
 
@@ -248,7 +248,7 @@ if ("abuse_num" %in% names(df_date)) {
 }
 
 if ("abuse_num" %in% names(df_all)) {
-  df_main <- df_all[df_all$abuse_num == 1, , drop = FALSE]
+  df_main <- df_all[df_all$abuse_num == 2, , drop = FALSE]
 } else {
   df_main <- df_all
 }
@@ -281,7 +281,7 @@ if ("abuse" %in% names(df_main) && is.factor(df_main$abuse)) {
 
 message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Main dataset shape: ", nrow(df_main), " rows x ", ncol(df_main), " columns")
 
-csv_name <- paste0(ORIGINAL_DATA_NAME, "_tillMar2024_singleType_dedup")
+csv_name <- paste0(ORIGINAL_DATA_NAME, "_tillMar2024_abuseNum2_dedup")
 write.csv(df_main, file.path(DATA_DIR, paste0(csv_name, ".csv")), row.names = FALSE)
 
 flow_rows <- list()
@@ -289,8 +289,9 @@ flow_rows[[length(flow_rows) + 1]] <- data.frame(Step = "Loaded raw", N = nrow(d
 flow_rows[[length(flow_rows) + 1]] <- data.frame(Step = paste0("Date <= ", format(END_DATE, "%Y-%m-%d")), N = nrow(df_date), stringsAsFactors = FALSE)
 flow_rows[[length(flow_rows) + 1]] <- data.frame(Step = "Target maltreatment (abuse in 4 types) & abuse_num>=1", N = nrow(df_all), stringsAsFactors = FALSE)
 if ("abuse_num" %in% names(df_all)) {
-  flow_rows[[length(flow_rows) + 1]] <- data.frame(Step = "Single-type only (abuse_num==1)", N = sum(df_all$abuse_num == 1, na.rm = TRUE), stringsAsFactors = FALSE)
-  flow_rows[[length(flow_rows) + 1]] <- data.frame(Step = "Multi-type excluded (abuse_num>1)", N = sum(df_all$abuse_num > 1, na.rm = TRUE), stringsAsFactors = FALSE)
+  flow_rows[[length(flow_rows) + 1]] <- data.frame(Step = "Double-type only main sample (abuse_num==2)", N = sum(df_all$abuse_num == 2, na.rm = TRUE), stringsAsFactors = FALSE)
+  flow_rows[[length(flow_rows) + 1]] <- data.frame(Step = "Single-type excluded (abuse_num==1)", N = sum(df_all$abuse_num == 1, na.rm = TRUE), stringsAsFactors = FALSE)
+  flow_rows[[length(flow_rows) + 1]] <- data.frame(Step = "Other multi-type excluded (abuse_num>2)", N = sum(df_all$abuse_num > 2, na.rm = TRUE), stringsAsFactors = FALSE)
 }
 if (!is.null(subject_id_col)) {
   flow_rows[[length(flow_rows) + 1]] <- data.frame(Step = paste0("Deduplicated to first exam per ", subject_id_col), N = nrow(df_main), stringsAsFactors = FALSE)
@@ -438,12 +439,12 @@ if ("date" %in% names(df)) {
 
 write.csv(df, file.path(DATA_DIR, paste0(csv_name, "_with_derived_variables.csv")), row.names = FALSE)
 
-# Compact profile of excluded multi-type cases, using direct replicated derivation.
+# Compact profile of records excluded from the abuse_num==2 main analysis.
 if ("abuse_num" %in% names(data0)) {
-  df_multi <- data0[data0$abuse_num != 1, , drop = FALSE]
+  df_multi <- data0[data0$abuse_num != 2, , drop = FALSE]
   if (nrow(df_multi) > 0) {
     df_multi_prof <- df_multi
-    write.csv(df_multi_prof, file.path(DATA_DIR, paste0(csv_name, "_multi_type_profile.csv")), row.names = FALSE)
+    write.csv(df_multi_prof, file.path(DATA_DIR, paste0(csv_name, "_excluded_non_abuse_num2_profile.csv")), row.names = FALSE)
     if ("age_year" %in% names(df_multi_prof)) {
       df_multi_prof$age_group <- cut(df_multi_prof$age_year, breaks = c(0, 6, 12, 18), labels = c("Early Childhood (2-6)", "Middle Childhood (7-12)", "Adolescence (13-18)"), right = TRUE, include.lowest = TRUE)
     }
@@ -513,7 +514,7 @@ if ("abuse_num" %in% names(data0)) {
     df_multi_prof$Healthy_Rate[is.infinite(df_multi_prof$Healthy_Rate) | df_multi_prof$total_teeth <= 0] <- NA_real_
     prof_cols <- c("age_year", "sex", "abuse", "abuse_num", "DMFT_Index", "Care_Index", "UTN_Score", "Healthy_Rate")
     prof_cols <- prof_cols[prof_cols %in% names(df_multi_prof)]
-    write.csv(summary(df_multi_prof[, prof_cols, drop = FALSE]), file.path(OUTPUT_DIR, paste0("multitype_profile_", timestamp, ".csv")))
+    write.csv(summary(df_multi_prof[, prof_cols, drop = FALSE]), file.path(OUTPUT_DIR, paste0("excluded_non_abuse_num2_profile_", timestamp, ".csv")))
   }
 }
 
@@ -2001,10 +2002,10 @@ if (nrow(sig_table) > 0) {
 message("Summary saved to ", summary_path)
 
 # -----------------------------
-# 17. Sensitivity analysis: include multi-type records
+# 17. Sensitivity analysis: include all target abuse_num>=1 records
 # -----------------------------
 if ("abuse_num" %in% names(df_all)) {
-  message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Running sensitivity analysis including multi-type cases...")
+  message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Running sensitivity analysis including all target abuse_num>=1 cases...")
   df_sens <- df_all
   df_sens$is_multitype <- as.integer(df_sens$abuse_num > 1)
   if (!is.null(subject_id_col) && subject_id_col %in% names(df_sens) && "date" %in% names(df_sens)) {
@@ -2163,7 +2164,7 @@ if ("abuse_num" %in% names(df_all)) {
     }
   }
   table4_sens <- if (length(table4_sens_rows) > 0) bind_rows(table4_sens_rows) else data.frame()
-  if (nrow(table4_sens) > 0) write.csv(table4_sens, file.path(OUTPUT_DIR, paste0("table4_logistic_regression_sensitivity_multitype_", timestamp, ".csv")), row.names = FALSE)
+  if (nrow(table4_sens) > 0) write.csv(table4_sens, file.path(OUTPUT_DIR, paste0("table4_logistic_regression_sensitivity_all_abuse_num_ge1_", timestamp, ".csv")), row.names = FALSE)
 }
 
 message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Analysis complete. Results saved to ", OUTPUT_DIR)
