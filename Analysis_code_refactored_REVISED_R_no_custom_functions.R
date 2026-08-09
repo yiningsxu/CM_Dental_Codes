@@ -31,8 +31,7 @@ suppressPackageStartupMessages(library(logistf))
 # - PMCMRplus: Dunn post-hoc tests after Kruskal-Wallis.
 # - logistf: Firth logistic regression fallback when glm has numerical problems.
 has_PMCMRplus <- requireNamespace("PMCMRplus", quietly = TRUE)
-has_logistf <- requireNamespace("
-logistf", quietly = TRUE)
+has_logistf <- requireNamespace("logistf", quietly = TRUE)
 
 timestamp <- format(Sys.Date(), "%Y%m%d")
 message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Starting Analysis...")
@@ -49,7 +48,7 @@ if (length(file_arg) > 0) {
 }
 
 # BASE_DIR <- normalizePath(SCRIPT_DIR, mustWork = FALSE)
-BASE_DIR <- "/Users/yining/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analysis"
+BASE_DIR <- "/Users/ayo/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analysis"
 
 # BASE_DIR <- normalizePath(file.path(SCRIPT_DIR, ".."), mustWork = FALSE)
 DATA_DIR <- file.path(BASE_DIR, "data")
@@ -1846,7 +1845,359 @@ table5_5 <- if (length(table5_5_rows) > 0) bind_rows(table5_5_rows) else data.fr
 write.csv(table5_5, file.path(OUTPUT_DIR, paste0("table5_5_caries_prevalence_treatment_", timestamp, ".csv")), row.names = FALSE)
 
 # -----------------------------
-# 14. Table 7: DMFT, Dt, Mt, Ft by year and abuse type
+# 14. Supplementary Table S7: primary dmft and permanent DMFT separately
+#     compared across maltreatment categories
+# -----------------------------
+message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Creating Supplementary Table S7...")
+
+# Primary dmft is evaluated among children with at least one primary tooth,
+# including children with primary or mixed dentition. Permanent DMFT is
+# evaluated among children with at least one permanent tooth, including
+# children with mixed or permanent dentition. This prevents children with no
+# teeth of the relevant dentition from being treated as having a score of zero.
+tableS7_specs <- data.frame(
+  Outcome = c(
+    "Primary dentition caries experience (dmft)",
+    "Permanent dentition caries experience (DMFT)"
+  ),
+  Variable = c("Baby_DMFT", "Perm_DMFT"),
+  Teeth_Count_Variable = c("Baby_total_teeth", "Perm_total_teeth"),
+  Analysis_Population = c(
+    "Children with >=1 primary tooth (primary or mixed dentition)",
+    "Children with >=1 permanent tooth (mixed or permanent dentition)"
+  ),
+  stringsAsFactors = FALSE
+)
+
+tableS7_abuse_types <- target_abuse_types[
+  target_abuse_types %in% unique(as.character(df$abuse[!is.na(df$abuse)]))
+]
+
+tableS7_rows <- list()
+tableS7_posthoc_rows <- list()
+
+for (s7_i in seq_len(nrow(tableS7_specs))) {
+  s7_outcome <- tableS7_specs$Outcome[s7_i]
+  s7_var <- tableS7_specs$Variable[s7_i]
+  s7_teeth_var <- tableS7_specs$Teeth_Count_Variable[s7_i]
+  s7_population <- tableS7_specs$Analysis_Population[s7_i]
+
+  if (!(s7_var %in% names(df)) || !(s7_teeth_var %in% names(df)) || !("abuse" %in% names(df))) {
+    warning("Table S7 skipped for ", s7_outcome, ": required variable(s) missing.")
+    next
+  }
+
+  df_s7 <- df[
+    !is.na(df[[s7_var]]) &
+      !is.na(df[[s7_teeth_var]]) &
+      df[[s7_teeth_var]] > 0 &
+      !is.na(df$abuse) &
+      df$abuse %in% tableS7_abuse_types,
+    ,
+    drop = FALSE
+  ]
+
+  if (nrow(df_s7) == 0) {
+    warning("Table S7 skipped for ", s7_outcome, ": no eligible observations.")
+    next
+  }
+
+  df_s7$abuse <- factor(as.character(df_s7$abuse), levels = tableS7_abuse_types)
+  df_s7$abuse <- droplevels(df_s7$abuse)
+  s7_present_groups <- levels(df_s7$abuse)
+
+  if (length(s7_present_groups) < 2) {
+    warning("Table S7 skipped for ", s7_outcome, ": fewer than two maltreatment categories.")
+    next
+  }
+
+  kw_s7 <- try(
+    kruskal.test(as.formula(paste(s7_var, "~ abuse")), data = df_s7),
+    silent = TRUE
+  )
+  s7_kw_h <- NA_real_
+  s7_kw_df <- NA_real_
+  s7_kw_p <- NA_real_
+  if (!inherits(kw_s7, "try-error")) {
+    s7_kw_h <- as.numeric(kw_s7$statistic)
+    s7_kw_df <- as.numeric(kw_s7$parameter)
+    s7_kw_p <- kw_s7$p.value
+  }
+
+  s7_total <- df_s7[[s7_var]]
+  s7_total <- s7_total[!is.na(s7_total)]
+  s7_total_sd <- if (length(s7_total) > 1) sd(s7_total) else NA_real_
+  s7_total_q <- if (length(s7_total) > 0) quantile(s7_total, c(0.25, 0.75), na.rm = TRUE) else c(NA_real_, NA_real_)
+
+  s7_row <- data.frame(
+    Outcome = s7_outcome,
+    Analysis_population = s7_population,
+    Total_N = length(s7_total),
+    Total_Mean_SD = ifelse(
+      length(s7_total) > 0,
+      ifelse(
+        is.na(s7_total_sd),
+        sprintf("%.2f ± N/A", mean(s7_total)),
+        sprintf("%.2f ± %.2f", mean(s7_total), s7_total_sd)
+      ),
+      "N/A"
+    ),
+    Total_Median_IQR = ifelse(
+      length(s7_total) > 0,
+      sprintf("%.2f [%.2f-%.2f]", median(s7_total), s7_total_q[1], s7_total_q[2]),
+      "N/A"
+    ),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  for (s7_abuse in tableS7_abuse_types) {
+    s7_x <- df_s7[[s7_var]][df_s7$abuse == s7_abuse]
+    s7_x <- s7_x[!is.na(s7_x)]
+    s7_x_sd <- if (length(s7_x) > 1) sd(s7_x) else NA_real_
+    s7_x_q <- if (length(s7_x) > 0) quantile(s7_x, c(0.25, 0.75), na.rm = TRUE) else c(NA_real_, NA_real_)
+
+    s7_row[[paste0(s7_abuse, " n")]] <- length(s7_x)
+    s7_row[[paste0(s7_abuse, " Mean ± SD")]] <- ifelse(
+      length(s7_x) > 0,
+      ifelse(
+        is.na(s7_x_sd),
+        sprintf("%.2f ± N/A", mean(s7_x)),
+        sprintf("%.2f ± %.2f", mean(s7_x), s7_x_sd)
+      ),
+      "N/A"
+    )
+    s7_row[[paste0(s7_abuse, " Median [IQR]")]] <- ifelse(
+      length(s7_x) > 0,
+      sprintf("%.2f [%.2f-%.2f]", median(s7_x), s7_x_q[1], s7_x_q[2]),
+      "N/A"
+    )
+  }
+
+  s7_row[["Kruskal-Wallis H"]] <- ifelse(is.na(s7_kw_h), "N/A", sprintf("%.3f", s7_kw_h))
+  s7_row[["Kruskal-Wallis df"]] <- ifelse(is.na(s7_kw_df), "N/A", sprintf("%.0f", s7_kw_df))
+  s7_row[["Overall p-value"]] <- ifelse(
+    is.na(s7_kw_p),
+    "N/A",
+    ifelse(s7_kw_p < 0.0001, "<0.0001", sprintf("%.4f", s7_kw_p))
+  )
+
+  # Create fixed columns for all six pairwise comparisons so that the two
+  # outcome rows have the same publication-ready structure.
+  if (length(tableS7_abuse_types) >= 2) {
+    for (s7_g1_i in seq_len(length(tableS7_abuse_types) - 1)) {
+      for (s7_g2_i in seq((s7_g1_i + 1), length(tableS7_abuse_types))) {
+        s7_g1 <- tableS7_abuse_types[s7_g1_i]
+        s7_g2 <- tableS7_abuse_types[s7_g2_i]
+        s7_row[[paste0(s7_g1, " vs ", s7_g2, " adjusted p")]] <- "N/A"
+      }
+    }
+  }
+
+  if (is.na(s7_kw_p)) {
+    s7_posthoc_method <- "Not performed because the overall Kruskal-Wallis test was unavailable"
+  } else if (s7_kw_p < 0.05) {
+    s7_posthoc_method <- "Post-hoc test unavailable"
+  } else {
+    s7_posthoc_method <- "Not performed because overall Kruskal-Wallis p >= 0.05"
+  }
+  s7_significant_pairs <- character(0)
+
+  # Perform pairwise post-hoc tests only when the omnibus test is significant.
+  # Dunn's test with Bonferroni adjustment is preferred; pairwise Wilcoxon with
+  # Bonferroni adjustment is used when PMCMRplus is unavailable.
+  if (!is.na(s7_kw_p) && s7_kw_p < 0.05) {
+    df_s7$rank_value_s7 <- rank(df_s7[[s7_var]], ties.method = "average")
+    s7_mean_rank_table <- aggregate(rank_value_s7 ~ abuse, data = df_s7, FUN = mean)
+
+    s7_p_adj_matrix <- NULL
+    s7_p_unadj_matrix <- NULL
+
+    if (has_PMCMRplus) {
+      s7_dunn_adj <- try(
+        PMCMRplus::kwAllPairsDunnTest(
+          x = df_s7[[s7_var]],
+          g = df_s7$abuse,
+          p.adjust.method = "bonferroni"
+        ),
+        silent = TRUE
+      )
+      s7_dunn_unadj <- try(
+        PMCMRplus::kwAllPairsDunnTest(
+          x = df_s7[[s7_var]],
+          g = df_s7$abuse,
+          p.adjust.method = "none"
+        ),
+        silent = TRUE
+      )
+      if (!inherits(s7_dunn_adj, "try-error") && !inherits(s7_dunn_unadj, "try-error")) {
+        s7_p_adj_matrix <- s7_dunn_adj$p.value
+        s7_p_unadj_matrix <- s7_dunn_unadj$p.value
+        s7_posthoc_method <- "Dunn test with Bonferroni adjustment"
+      }
+    }
+
+    if (is.null(s7_p_adj_matrix)) {
+      s7_pw_adj <- try(
+        pairwise.wilcox.test(
+          x = df_s7[[s7_var]],
+          g = df_s7$abuse,
+          p.adjust.method = "bonferroni",
+          exact = FALSE
+        ),
+        silent = TRUE
+      )
+      s7_pw_unadj <- try(
+        pairwise.wilcox.test(
+          x = df_s7[[s7_var]],
+          g = df_s7$abuse,
+          p.adjust.method = "none",
+          exact = FALSE
+        ),
+        silent = TRUE
+      )
+      if (!inherits(s7_pw_adj, "try-error") && !inherits(s7_pw_unadj, "try-error")) {
+        s7_p_adj_matrix <- s7_pw_adj$p.value
+        s7_p_unadj_matrix <- s7_pw_unadj$p.value
+        s7_posthoc_method <- "Pairwise Wilcoxon test with Bonferroni adjustment"
+      }
+    }
+
+    if (!is.null(s7_p_adj_matrix)) {
+      for (s7_g1_i in seq_len(length(s7_present_groups) - 1)) {
+        for (s7_g2_i in seq((s7_g1_i + 1), length(s7_present_groups))) {
+          s7_g1 <- s7_present_groups[s7_g1_i]
+          s7_g2 <- s7_present_groups[s7_g2_i]
+
+          s7_p_adj <- NA_real_
+          s7_p_unadj <- NA_real_
+
+          if (s7_g1 %in% rownames(s7_p_adj_matrix) && s7_g2 %in% colnames(s7_p_adj_matrix)) {
+            s7_p_adj <- s7_p_adj_matrix[s7_g1, s7_g2]
+          }
+          if (s7_g2 %in% rownames(s7_p_adj_matrix) && s7_g1 %in% colnames(s7_p_adj_matrix)) {
+            s7_p_adj <- s7_p_adj_matrix[s7_g2, s7_g1]
+          }
+          if (s7_g1 %in% rownames(s7_p_unadj_matrix) && s7_g2 %in% colnames(s7_p_unadj_matrix)) {
+            s7_p_unadj <- s7_p_unadj_matrix[s7_g1, s7_g2]
+          }
+          if (s7_g2 %in% rownames(s7_p_unadj_matrix) && s7_g1 %in% colnames(s7_p_unadj_matrix)) {
+            s7_p_unadj <- s7_p_unadj_matrix[s7_g2, s7_g1]
+          }
+
+          if (is.na(s7_p_adj)) next
+
+          s7_p_adj_text <- ifelse(s7_p_adj < 0.0001, "<0.0001", sprintf("%.4f", s7_p_adj))
+          s7_p_unadj_text <- ifelse(
+            is.na(s7_p_unadj),
+            "N/A",
+            ifelse(s7_p_unadj < 0.0001, "<0.0001", sprintf("%.4f", s7_p_unadj))
+          )
+          s7_row[[paste0(s7_g1, " vs ", s7_g2, " adjusted p")]] <- s7_p_adj_text
+
+          s7_vals1 <- df_s7[[s7_var]][df_s7$abuse == s7_g1]
+          s7_vals2 <- df_s7[[s7_var]][df_s7$abuse == s7_g2]
+          s7_vals1 <- s7_vals1[!is.na(s7_vals1)]
+          s7_vals2 <- s7_vals2[!is.na(s7_vals2)]
+          if (length(s7_vals1) == 0 || length(s7_vals2) == 0) next
+
+          s7_q1 <- quantile(s7_vals1, c(0.25, 0.75), na.rm = TRUE)
+          s7_q2 <- quantile(s7_vals2, c(0.25, 0.75), na.rm = TRUE)
+          s7_mr1 <- s7_mean_rank_table$rank_value_s7[s7_mean_rank_table$abuse == s7_g1]
+          s7_mr2 <- s7_mean_rank_table$rank_value_s7[s7_mean_rank_table$abuse == s7_g2]
+
+          s7_direction <- "Equal mean ranks"
+          if (length(s7_mr1) > 0 && length(s7_mr2) > 0) {
+            if (s7_mr1 > s7_mr2) s7_direction <- paste0(s7_g1, " > ", s7_g2)
+            if (s7_mr2 > s7_mr1) s7_direction <- paste0(s7_g2, " > ", s7_g1)
+          }
+
+          if (!is.na(s7_p_adj) && s7_p_adj < 0.05) {
+            s7_significant_pairs <- c(
+              s7_significant_pairs,
+              paste0(
+                s7_direction,
+                " (adjusted p ",
+                ifelse(substr(s7_p_adj_text, 1, 1) == "<", "", "= "),
+                s7_p_adj_text,
+                ")"
+              )
+            )
+          }
+
+          tableS7_posthoc_rows[[length(tableS7_posthoc_rows) + 1]] <- data.frame(
+            Outcome = s7_outcome,
+            Analysis_population = s7_population,
+            Group1 = s7_g1,
+            Group2 = s7_g2,
+            Comparison = paste0(s7_g1, " vs ", s7_g2),
+            Group1_n = length(s7_vals1),
+            Group2_n = length(s7_vals2),
+            Group1_Mean_SD = ifelse(
+              length(s7_vals1) > 1,
+              sprintf("%.2f ± %.2f", mean(s7_vals1), sd(s7_vals1)),
+              sprintf("%.2f ± N/A", mean(s7_vals1))
+            ),
+            Group2_Mean_SD = ifelse(
+              length(s7_vals2) > 1,
+              sprintf("%.2f ± %.2f", mean(s7_vals2), sd(s7_vals2)),
+              sprintf("%.2f ± N/A", mean(s7_vals2))
+            ),
+            Group1_Median_IQR = sprintf("%.2f [%.2f-%.2f]", median(s7_vals1), s7_q1[1], s7_q1[2]),
+            Group2_Median_IQR = sprintf("%.2f [%.2f-%.2f]", median(s7_vals2), s7_q2[1], s7_q2[2]),
+            Group1_Mean_Rank = ifelse(length(s7_mr1) > 0, round(s7_mr1, 2), NA_real_),
+            Group2_Mean_Rank = ifelse(length(s7_mr2) > 0, round(s7_mr2, 2), NA_real_),
+            Direction_based_on_mean_rank = s7_direction,
+            Kruskal_Wallis_p = s7_kw_p,
+            p_unadjusted = s7_p_unadj,
+            p_adjusted_Bonferroni = s7_p_adj,
+            `p-value (unadjusted)` = s7_p_unadj_text,
+            `p-value (adjusted)` = s7_p_adj_text,
+            Significant_after_adjustment = ifelse(s7_p_adj < 0.05, "Yes", "No"),
+            Method = s7_posthoc_method,
+            check.names = FALSE,
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+    }
+  }
+
+  s7_row[["Post-hoc method"]] <- s7_posthoc_method
+  s7_row[["Significant pairwise comparisons"]] <- ifelse(
+    length(s7_significant_pairs) > 0,
+    paste(s7_significant_pairs, collapse = "; "),
+    "None"
+  )
+
+  tableS7_rows[[length(tableS7_rows) + 1]] <- s7_row
+}
+
+tableS7 <- if (length(tableS7_rows) > 0) bind_rows(tableS7_rows) else data.frame()
+tableS7_posthoc <- if (length(tableS7_posthoc_rows) > 0) bind_rows(tableS7_posthoc_rows) else data.frame()
+
+if (nrow(tableS7) > 0) {
+  write.csv(
+    tableS7,
+    file.path(OUTPUT_DIR, paste0("tableS7_primary_and_permanent_caries_by_abuse_", timestamp, ".csv")),
+    row.names = FALSE,
+    na = ""
+  )
+}
+
+# Detailed pairwise results are saved separately as an audit/support file; the
+# publication-ready Table S7 is the wide table written above.
+if (nrow(tableS7_posthoc) > 0) {
+  write.csv(
+    tableS7_posthoc,
+    file.path(OUTPUT_DIR, paste0("tableS7_pairwise_detail_", timestamp, ".csv")),
+    row.names = FALSE,
+    na = ""
+  )
+}
+
+# -----------------------------
+# 15. Table 7: DMFT, Dt, Mt, Ft by year and abuse type
 # -----------------------------
 message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Creating Table 7...")
 
@@ -1894,7 +2245,7 @@ table7 <- if (length(table7_rows) > 0) bind_rows(table7_rows) else data.frame()
 if (nrow(table7) > 0) write.csv(table7, file.path(OUTPUT_DIR, paste0("table7_dmft_by_year_abuse_", timestamp, ".csv")), row.names = FALSE)
 
 # -----------------------------
-# 15. Visualizations
+# 16. Visualizations
 # -----------------------------
 message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Creating visualizations...")
 
@@ -1986,7 +2337,7 @@ for (var_name in c("Healthy_Rate", "Baby_d", "Baby_DMFT", "Care_Index", "UTN_Sco
 }
 
 # -----------------------------
-# 16. Summary report
+# 17. Summary report
 # -----------------------------
 sig_table <- data.frame()
 if (nrow(t3_overall) > 0 && "Significant" %in% names(t3_overall)) {
@@ -2001,7 +2352,7 @@ if (nrow(sig_table) > 0) {
 message("Summary saved to ", summary_path)
 
 # -----------------------------
-# 17. Sensitivity analysis: include multi-type records
+# 18. Sensitivity analysis: include multi-type records
 # -----------------------------
 if ("abuse_num" %in% names(df_all)) {
   message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Running sensitivity analysis including multi-type cases...")
