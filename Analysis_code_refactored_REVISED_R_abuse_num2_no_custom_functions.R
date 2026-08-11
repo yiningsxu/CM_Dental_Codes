@@ -49,7 +49,7 @@ if (length(file_arg) > 0) {
 }
 
 # BASE_DIR <- normalizePath(SCRIPT_DIR, mustWork = FALSE)
-BASE_DIR <- "/Users/yining/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analysis"
+BASE_DIR <- "/Users/ayo/Desktop/_GSAIS_/Research/OralHealth_tokyo/paper_analysis"
 
 # BASE_DIR <- normalizePath(file.path(SCRIPT_DIR, ".."), mustWork = FALSE)
 DATA_DIR <- file.path(BASE_DIR, "data")

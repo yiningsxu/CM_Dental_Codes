@@ -70,7 +70,6 @@ message("ORIGINAL_DATA_PATH: ", ORIGINAL_DATA_PATH)
 END_DATE <- as.Date("2024-03-31")
 target_abuse_types <- c("Physical Abuse", "Neglect", "Emotional Abuse", "Sexual Abuse")
 SUBJECT_ID_COL_CANDIDATES <- c("No_All", "child_id", "subject_id", "case_id", "ID", "id")
-EXAMINER_COL_CANDIDATES <- c("dentist", "examiner", "doctor", "operator", "checker")
 
 # -----------------------------
 # 2. Data loading
@@ -256,13 +255,6 @@ subject_id_col <- NULL
 for (candidate in SUBJECT_ID_COL_CANDIDATES) {
   if (candidate %in% names(df_main) && is.null(subject_id_col)) {
     subject_id_col <- candidate
-  }
-}
-
-examiner_col <- NULL
-for (candidate in EXAMINER_COL_CANDIDATES) {
-  if (candidate %in% names(df_main) && is.null(examiner_col)) {
-    examiner_col <- candidate
   }
 }
 
@@ -1077,7 +1069,6 @@ for (stratum_label in strata_values) {
       df_model$comparison <- as.integer(df_model$abuse == comparison)
       needed_cols <- c(outcome_var, "age_year", "sex_male", "comparison", "abuse")
       if ("year" %in% names(df_model)) needed_cols <- c(needed_cols, "year")
-      if (!is.null(examiner_col) && examiner_col %in% names(df_model)) needed_cols <- c(needed_cols, examiner_col)
       if (!is.null(subject_id_col) && subject_id_col %in% names(df_model)) needed_cols <- c(needed_cols, subject_id_col)
       needed_cols <- unique(needed_cols[needed_cols %in% names(df_model)])
       df_model <- df_model[, needed_cols, drop = FALSE]
@@ -1090,10 +1081,6 @@ for (stratum_label in strata_values) {
       if ("year" %in% names(df_model)) {
         rhs_terms <- c(rhs_terms, "factor(year)")
         adjusted_for <- c(adjusted_for, "Year (FE)")
-      }
-      if (!is.null(examiner_col) && examiner_col %in% names(df_model)) {
-        rhs_terms <- c(rhs_terms, paste0("factor(", examiner_col, ")"))
-        adjusted_for <- c(adjusted_for, "Examiner (FE)")
       }
       model_formula <- as.formula(paste(outcome_var, "~", paste(rhs_terms, collapse = " + ")))
       fit <- try(glm(model_formula, data = df_model, family = binomial()), silent = TRUE)
@@ -1251,9 +1238,10 @@ forest_df <- forest_df %>%
 y_positions <- c(15, 14, 13, 11, 10, 9, 7, 6, 5, 3, 2, 1)
 forest_df$y <- y_positions[1:nrow(forest_df)]
 
-group_centers <- forest_df %>%
-  group_by(Outcome_jp) %>%
-  summarise(y_center = mean(y), .groups = "drop")
+# 各Outcome見出しを、そのOutcome内の一番上の行（Neglect）と同じ高さに配置
+group_label_positions <- forest_df %>%
+  filter(Comp_jp == "ネグレクト") %>%
+  transmute(Outcome_jp, y_label_position = y)
 
 # -----------------------------
 # 5. 色と形
@@ -1290,12 +1278,13 @@ p_forest_jp <- ggplot(forest_df, aes(x = OR, y = y)) +
     color = "black"
   ) +
 
-  # 左側のOutcome見出し
+  # 左側のOutcome見出し：各OutcomeのNeglect行と同じ高さに表示
   geom_text(
-    data = group_centers,
-    aes(x = -1.35, y = y_center, label = Outcome_jp),
+    data = group_label_positions,
+    aes(x = -1.35, y = y_label_position, label = Outcome_jp),
     inherit.aes = FALSE,
     hjust = 1,
+    vjust = 0.5,
     fontface = "bold",
     size = 5.8
   ) +
@@ -2455,7 +2444,6 @@ if ("abuse_num" %in% names(df_all)) {
       df_model$comparison <- as.integer(df_model$abuse == comparison)
       needed_cols <- c(outcome_var, "age_year", "sex_male", "comparison", "abuse", "is_multitype")
       if ("year" %in% names(df_model)) needed_cols <- c(needed_cols, "year")
-      if (!is.null(examiner_col) && examiner_col %in% names(df_model)) needed_cols <- c(needed_cols, examiner_col)
       needed_cols <- unique(needed_cols[needed_cols %in% names(df_model)])
       df_model <- df_model[, needed_cols, drop = FALSE]
       df_model <- df_model[complete.cases(df_model[, c(outcome_var, "age_year", "sex_male", "comparison", "is_multitype"), drop = FALSE]), , drop = FALSE]
@@ -2466,10 +2454,6 @@ if ("abuse_num" %in% names(df_all)) {
       if ("year" %in% names(df_model)) {
         rhs_terms <- c(rhs_terms, "factor(year)")
         adjusted_for <- c(adjusted_for, "Year (FE)")
-      }
-      if (!is.null(examiner_col) && examiner_col %in% names(df_model)) {
-        rhs_terms <- c(rhs_terms, paste0("factor(", examiner_col, ")"))
-        adjusted_for <- c(adjusted_for, "Examiner (FE)")
       }
       model_formula <- as.formula(paste(outcome_var, "~", paste(rhs_terms, collapse = " + ")))
       fit <- try(glm(model_formula, data = df_model, family = binomial()), silent = TRUE)

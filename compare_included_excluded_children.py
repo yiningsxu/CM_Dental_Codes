@@ -30,6 +30,17 @@ CONTINUOUS_VARIABLES = [
     ("Untreated caries rate, % among children with caries", "UTN_Score"),
 ]
 
+
+# Dentition-specific eligibility, matched to Supplementary Table S7:
+# - Permanent DMFT: include only children with >=1 permanent tooth.
+# - Primary dmft: include only children with >=1 primary tooth.
+# This prevents children with no teeth of the relevant dentition from being
+# analyzed as DMFT/dmft = 0 merely because tooth-status cells contain -1.
+DENTITION_SPECIFIC_ELIGIBILITY = {
+    "Perm_DMFT": "Perm_total_teeth",
+    "Baby_DMFT": "Baby_total_teeth",
+}
+
 BINARY_VARIABLES = [
     ("Female sex", "sex", "Female"),
     ("Caries experience (dmft/DMFT > 0)", "has_caries", 1),
@@ -71,6 +82,25 @@ def fmt_median_iqr(values: pd.Series) -> str:
     median = values.median()
     q3 = values.quantile(0.75)
     return f"{median:.1f} [{q1:.1f}-{q3:.1f}]"
+
+
+def continuous_analysis_series(df: pd.DataFrame, col: str) -> pd.Series:
+    """Return the analysis series using the same dentition eligibility as Table S7."""
+    if col in DENTITION_SPECIFIC_ELIGIBILITY:
+        teeth_col = DENTITION_SPECIFIC_ELIGIBILITY[col]
+        if teeth_col not in df.columns:
+            raise KeyError(
+                f"Required tooth-count variable '{teeth_col}' is missing for '{col}'."
+            )
+
+        eligible = (
+            pd.to_numeric(df[col], errors="coerce").notna()
+            & pd.to_numeric(df[teeth_col], errors="coerce").notna()
+            & pd.to_numeric(df[teeth_col], errors="coerce").gt(0)
+        )
+        return pd.to_numeric(df.loc[eligible, col], errors="coerce")
+
+    return pd.to_numeric(df[col], errors="coerce").dropna()
 
 
 def continuous_p(included: pd.Series, excluded: pd.Series) -> float:
@@ -147,15 +177,18 @@ def categorical_summary(df: pd.DataFrame, col: str) -> str:
 def build_comparison_table(included: pd.DataFrame, excluded: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for label, col in CONTINUOUS_VARIABLES:
-        x = included[col]
-        y = excluded[col]
+        # For Perm_DMFT and Baby_DMFT, apply the same eligibility definition as
+        # Table S7 before calculating N, descriptive statistics, SMD, or P value.
+        x = continuous_analysis_series(included, col)
+        y = continuous_analysis_series(excluded, col)
+
         rows.append(
             {
                 "Domain": "Age" if col == "age_year" else "Oral health outcome",
                 "Variable": label,
                 "Included sample (abuse_num=1), N=1235": f"{fmt_mean_sd(x)}; {fmt_median_iqr(x)}",
                 "Excluded children (abuse_num>1), N=70": f"{fmt_mean_sd(y)}; {fmt_median_iqr(y)}",
-                "Non-missing N included/excluded": f"{x.notna().sum()}/{y.notna().sum()}",
+                "Analysis N included/excluded": f"{len(x)}/{len(y)}",
                 "Difference": f"SMD {standardized_mean_difference(x, y):+.2f}",
                 "Test": "Mann-Whitney U",
                 "P value": fmt_p(continuous_p(x, y)),
@@ -169,7 +202,7 @@ def build_comparison_table(included: pd.DataFrame, excluded: pd.DataFrame) -> pd
                 "Variable": label,
                 "Included sample (abuse_num=1), N=1235": fmt_binary(included[col], positive_value),
                 "Excluded children (abuse_num>1), N=70": fmt_binary(excluded[col], positive_value),
-                "Non-missing N included/excluded": f"{included[col].notna().sum()}/{excluded[col].notna().sum()}",
+                "Analysis N included/excluded": f"{included[col].notna().sum()}/{excluded[col].notna().sum()}",
                 "Difference": f"{binary_difference_pp(included[col], excluded[col], positive_value):+.1f} pp",
                 "Test": "Fisher exact test",
                 "P value": fmt_p(binary_p(included[col], excluded[col], positive_value)),
@@ -183,7 +216,7 @@ def build_comparison_table(included: pd.DataFrame, excluded: pd.DataFrame) -> pd
                 "Variable": label,
                 "Included sample (abuse_num=1), N=1235": categorical_summary(included, col),
                 "Excluded children (abuse_num>1), N=70": categorical_summary(excluded, col),
-                "Non-missing N included/excluded": f"{included[col].notna().sum()}/{excluded[col].notna().sum()}",
+                "Analysis N included/excluded": f"{included[col].notna().sum()}/{excluded[col].notna().sum()}",
                 "Difference": "",
                 "Test": "Chi-square test",
                 "P value": fmt_p(categorical_p(included[col], excluded[col])),
@@ -226,7 +259,7 @@ In the primary single-subtype maltreatment analysis, children excluded because o
 
 ## Suggested Supplementary Table Caption
 
-**Supplementary Table X. Comparison of children included in the primary analysis and children excluded because of multiple maltreatment subtypes.** Continuous variables are summarized as mean +/- SD; median [IQR]. Binary variables are summarized as n/N (%). Mann-Whitney U tests were used for continuous variables, Fisher exact tests for binary variables, and chi-square tests for multi-category variables. The included sample comprised children with one maltreatment subtype (`abuse_num=1`). Excluded children had more than one maltreatment subtype (`abuse_num>1`); in this dataset, all excluded children had `abuse_num=2`.
+**Supplementary Table X. Comparison of children included in the primary analysis and children excluded because of multiple maltreatment subtypes.** Continuous variables are summarized as mean +/- SD; median [IQR]. Binary variables are summarized as n/N (%). Mann-Whitney U tests were used for continuous variables, Fisher exact tests for binary variables, and chi-square tests for multi-category variables. Permanent DMFT was evaluated only among children with at least one permanent tooth, and primary dmft only among children with at least one primary tooth, consistent with Supplementary Table S7. The included sample comprised children with one maltreatment subtype (`abuse_num=1`). Excluded children had more than one maltreatment subtype (`abuse_num>1`); in this dataset, all excluded children had `abuse_num=2`.
 
 ## Supplementary Table X
 
@@ -345,6 +378,18 @@ def main() -> None:
     included = pd.read_csv(INCLUDED_PATH)
     excluded = pd.read_csv(EXCLUDED_PATH)
     table = build_comparison_table(included, excluded)
+
+    # Audit dentition-specific denominators against Table S7 definitions.
+    for label, col, teeth_col in [
+        ("Permanent DMFT", "Perm_DMFT", "Perm_total_teeth"),
+        ("Primary dmft", "Baby_DMFT", "Baby_total_teeth"),
+    ]:
+        included_n = len(continuous_analysis_series(included, col))
+        excluded_n = len(continuous_analysis_series(excluded, col))
+        print(
+            f"{label}: included N={included_n}, excluded N={excluded_n} "
+            f"(eligibility: {teeth_col} > 0)"
+        )
 
     csv_path = OUT_DIR / "supplementary_table_included_vs_excluded.csv"
     xlsx_path = OUT_DIR / "supplementary_table_included_vs_excluded.xlsx"
