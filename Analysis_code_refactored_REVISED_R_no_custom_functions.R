@@ -1,11 +1,3 @@
-# ============================================================================
-# Refactored Analysis Code (REVISED) - R procedural version
-# Converted from the uploaded Python analysis scripts.
-# This version avoids user-defined/custom R functions and does not source a
-# separate functions file. The workflow is written as direct, line-by-line code
-# blocks using base R and package functions.
-# ============================================================================
-
 # -----------------------------
 # 0. Packages
 # -----------------------------
@@ -170,7 +162,7 @@ cleaned_path <- file.path(DATA_DIR, paste0(ORIGINAL_DATA_NAME, "_AllData_cleaned
 write.csv(data0, cleaned_path, row.names = FALSE)
 
 # Value-count summary, written inline rather than through a helper.
-exclude_cols <- c("No_All", "instruction_detail", "instruction", "memo")
+exclude_cols <- c("No_All", "instruction_detail", "instruction", "memo", "Orthodontics", "dentists", "dental_hygienist", "wake_up", "breakfast", "morning_brushing", "school", "bedtime", "night_brushing", "TV", "game", "meal", "extra_lesson")
 value_count_rows <- list()
 for (col in names(data0)) {
   if (!(col %in% exclude_cols)) {
@@ -1024,317 +1016,1096 @@ if (nrow(t3_tidy) > 0) write.csv(t3_tidy, file.path(OUTPUT_DIR, paste0("table3_t
 # -----------------------------
 # 10. Table 4: multivariable logistic regression
 # -----------------------------
-message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Creating Table 4...")
+# ============================================================
+# Table 4 and Figure 4
+# Pairwise logistic regression models
+#
+# Reference category: Physical Abuse
+# Comparisons:
+#   1. Neglect vs Physical Abuse
+#   2. Emotional Abuse vs Physical Abuse
+#   3. Sexual Abuse vs Physical Abuse
+#
+# Adjustment variables:
+#   - Age: restricted/natural cubic spline with df = 4
+#   - Sex
+#
+# No adjustment for:
+#   - Year
+#   - Examiner
+#   - Subject ID
+# ============================================================
 
-if ("sex" %in% names(df)) {
-  df$sex_male <- as.integer(df$sex == "Male")
-}
-if ("gingivitis" %in% names(df)) {
-  df$gingivitis_binary <- as.integer(df$gingivitis == "Gingivitis")
-}
-if ("needTOBEtreated" %in% names(df)) {
-  df$treatment_need <- as.integer(df$needTOBEtreated == "Treatment Required")
+message(
+  format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+  " - INFO - Creating Table 4 and Figure 4..."
+)
+
+dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+
+# ------------------------------------------------------------
+# 1. Create binary covariates and outcomes
+# ------------------------------------------------------------
+
+# Sex:
+# Male = 1, other sex category = 0, missing = NA
+if (!"sex_male" %in% names(df)) {
+  if (!"sex" %in% names(df)) {
+    stop("Variable `sex` was not found in df.")
+  }
+
+  df$sex_male <- ifelse(
+    is.na(df$sex),
+    NA_integer_,
+    as.integer(df$sex == "Male")
+  )
 }
 
-outcome_vars <- c("has_caries", "has_untreated_caries")
-outcome_labels <- c("Caries Experience (>0)", "Untreated Caries")
-if ("gingivitis_binary" %in% names(df)) {
-  outcome_vars <- c(outcome_vars, "gingivitis_binary")
-  outcome_labels <- c(outcome_labels, "Gingivitis")
+
+# Gingivitis:
+# Gingivitis = 1, absent = 0, missing = NA
+if (!"gingivitis_binary" %in% names(df)) {
+  if (!"gingivitis" %in% names(df)) {
+    stop("Variable `gingivitis` was not found in df.")
+  }
+
+  df$gingivitis_binary <- ifelse(
+    is.na(df$gingivitis),
+    NA_integer_,
+    as.integer(df$gingivitis == "Gingivitis")
+  )
 }
-if ("treatment_need" %in% names(df)) {
-  outcome_vars <- c(outcome_vars, "treatment_need")
-  outcome_labels <- c(outcome_labels, "Treatment Need")
+
+
+# Treatment need:
+# Treatment Required = 1, not required = 0, missing = NA
+if (!"treatment_need" %in% names(df)) {
+  if (!"needTOBEtreated" %in% names(df)) {
+    stop("Variable `needTOBEtreated` was not found in df.")
+  }
+
+  df$treatment_need <- ifelse(
+    is.na(df$needTOBEtreated),
+    NA_integer_,
+    as.integer(df$needTOBEtreated == "Treatment Required")
+  )
 }
+
+
+# `has_caries` and `has_untreated_caries` must have been defined
+# earlier in the script as:
+#
+# has_caries:
+#   total caries experience > 0
+#
+# has_untreated_caries:
+#   total number of untreated decayed teeth >= 1
+#
+# Example only:
+# df$has_caries <- as.integer(total_caries_experience > 0)
+# df$has_untreated_caries <- as.integer(total_decayed_teeth >= 1)
+
+
+# ------------------------------------------------------------
+# 2. Check required variables
+# ------------------------------------------------------------
+
+required_vars <- c(
+  "abuse",
+  "age_year",
+  "sex_male",
+  "has_caries",
+  "has_untreated_caries",
+  "gingivitis_binary",
+  "treatment_need"
+)
+
+missing_vars <- setdiff(required_vars, names(df))
+
+if (length(missing_vars) > 0) {
+  stop(
+    "The following required variables were not found in df: ",
+    paste(missing_vars, collapse = ", ")
+  )
+}
+
+if (!is.numeric(df$age_year)) {
+  stop("`age_year` must be a numeric variable.")
+}
+
+
+# ------------------------------------------------------------
+# 3. Ensure that all binary variables are coded as 0/1
+# ------------------------------------------------------------
+
+as_binary_01 <- function(x, variable_name) {
+
+  if (is.logical(x)) {
+    return(as.integer(x))
+  }
+
+  if (is.factor(x)) {
+    x <- as.character(x)
+  }
+
+  original_nonmissing <- !is.na(x)
+  x_numeric <- suppressWarnings(as.numeric(x))
+
+  conversion_failed <- original_nonmissing & is.na(x_numeric)
+
+  if (any(conversion_failed)) {
+    stop(
+      "`", variable_name,
+      "` contains values that cannot be converted to 0/1."
+    )
+  }
+
+  observed_values <- unique(x_numeric[!is.na(x_numeric)])
+
+  if (!all(observed_values %in% c(0, 1))) {
+    stop(
+      "`", variable_name,
+      "` must contain only 0, 1, and NA. Observed values: ",
+      paste(observed_values, collapse = ", ")
+    )
+  }
+
+  as.integer(x_numeric)
+}
+
+binary_vars <- c(
+  "sex_male",
+  "has_caries",
+  "has_untreated_caries",
+  "gingivitis_binary",
+  "treatment_need"
+)
+
+for (variable_name in binary_vars) {
+  df[[variable_name]] <- as_binary_01(
+    df[[variable_name]],
+    variable_name
+  )
+}
+
+
+# ------------------------------------------------------------
+# 4. Specify outcomes and pairwise comparisons
+# ------------------------------------------------------------
+
+outcome_vars <- c(
+  "has_caries",
+  "has_untreated_caries",
+  "gingivitis_binary",
+  "treatment_need"
+)
+
+outcome_labels <- c(
+  has_caries = "Caries Experience (>0)",
+  has_untreated_caries = "Untreated Caries",
+  gingivitis_binary = "Gingivitis",
+  treatment_need = "Treatment Need"
+)
 
 reference_category <- "Physical Abuse"
-comparison_categories <- c("Neglect", "Emotional Abuse", "Sexual Abuse")
-strata_values <- c("Overall", dentition_order)
+
+comparison_categories <- c(
+  "Neglect",
+  "Emotional Abuse",
+  "Sexual Abuse"
+)
+
+expected_abuse_categories <- c(
+  reference_category,
+  comparison_categories
+)
+
+missing_abuse_categories <- setdiff(
+  expected_abuse_categories,
+  unique(df$abuse)
+)
+
+if (length(missing_abuse_categories) > 0) {
+  warning(
+    "The following maltreatment categories were not found in df: ",
+    paste(missing_abuse_categories, collapse = ", ")
+  )
+}
+
+
+# ------------------------------------------------------------
+# 5. Fit pairwise logistic regression models
+# ------------------------------------------------------------
+
 table4_rows <- list()
 
-for (stratum_label in strata_values) {
-  if (stratum_label == "Overall") {
-    df_stratum <- df
-  } else {
-    df_stratum <- df[df$dentition_type == stratum_label, , drop = FALSE]
-  }
-  if (nrow(df_stratum) == 0) next
-  for (out_i in seq_along(outcome_vars)) {
-    outcome_var <- outcome_vars[out_i]
-    outcome_label <- outcome_labels[out_i]
-    if (!(outcome_var %in% names(df_stratum))) next
-    for (comparison in comparison_categories) {
-      df_model <- df_stratum[df_stratum$abuse %in% c(reference_category, comparison), , drop = FALSE]
-      if (!("age_year" %in% names(df_model)) || !("sex_male" %in% names(df_model))) next
-      df_model$comparison <- as.integer(df_model$abuse == comparison)
-      needed_cols <- c(outcome_var, "age_year", "sex_male", "comparison", "abuse")
-      if ("year" %in% names(df_model)) needed_cols <- c(needed_cols, "year")
-      if (!is.null(subject_id_col) && subject_id_col %in% names(df_model)) needed_cols <- c(needed_cols, subject_id_col)
-      needed_cols <- unique(needed_cols[needed_cols %in% names(df_model)])
-      df_model <- df_model[, needed_cols, drop = FALSE]
-      df_model <- df_model[complete.cases(df_model[, c(outcome_var, "age_year", "sex_male", "comparison"), drop = FALSE]), , drop = FALSE]
-      if (nrow(df_model) < 50) next
-      if (length(unique(df_model[[outcome_var]])) < 2) next
+for (outcome_var in outcome_vars) {
 
-      rhs_terms <- c("splines::ns(age_year, df = 4)", "sex_male", "comparison")
-      adjusted_for <- c("Age (spline)", "Sex")
-      if ("year" %in% names(df_model)) {
-        rhs_terms <- c(rhs_terms, "factor(year)")
-        adjusted_for <- c(adjusted_for, "Year (FE)")
-      }
-      model_formula <- as.formula(paste(outcome_var, "~", paste(rhs_terms, collapse = " + ")))
-      fit <- try(glm(model_formula, data = df_model, family = binomial()), silent = TRUE)
-      model_name <- "Logit (glm)"
-      beta <- NA_real_
-      se <- NA_real_
-      p_val <- NA_real_
-      if (!inherits(fit, "try-error")) {
-        coefs <- summary(fit)$coefficients
-        if ("comparison" %in% rownames(coefs)) {
-          beta <- coefs["comparison", "Estimate"]
-          se <- coefs["comparison", "Std. Error"]
-          p_val <- coefs["comparison", "Pr(>|z|)"]
-        }
-      }
-      if ((is.na(beta) || is.na(se) || !is.finite(beta) || !is.finite(se)) && has_logistf) {
-        fit_firth <- try(logistf::logistf(model_formula, data = df_model), silent = TRUE)
-        if (!inherits(fit_firth, "try-error")) {
-          beta <- fit_firth$coefficients["comparison"]
-          se <- sqrt(diag(fit_firth$var))["comparison"]
-          p_val <- fit_firth$prob["comparison"]
-          model_name <- "Logit (Firth/logistf)"
-        }
-      }
-      or_val <- exp(beta)
-      ci_low <- exp(beta - 1.96 * se)
-      ci_up <- exp(beta + 1.96 * se)
-      table4_rows[[length(table4_rows) + 1]] <- data.frame(
-        Stratum = ifelse(stratum_label == "Overall", "", stratum_label),
-        Outcome = outcome_label,
-        Comparison = paste0(comparison, " vs ", reference_category),
-        N = nrow(df_model),
-        Events = sum(df_model[[outcome_var]], na.rm = TRUE),
-        `Odds Ratio` = ifelse(is.finite(or_val), sprintf("%.2f", or_val), "N/A"),
-        `95% CI` = ifelse(is.finite(ci_low) & is.finite(ci_up), sprintf("(%.2f-%.2f)", ci_low, ci_up), "N/A"),
-        `p-value` = ifelse(is.na(p_val), "N/A", ifelse(p_val < 0.0001, "<0.0001", sprintf("%.4f", p_val))),
-        Model = model_name,
-        Adjusted_for = paste(adjusted_for, collapse = ", "),
-        check.names = FALSE,
-        stringsAsFactors = FALSE
-      )
-    }
-  }
-}
+  outcome_label <- unname(outcome_labels[[outcome_var]])
 
-table4_all <- if (length(table4_rows) > 0) bind_rows(table4_rows) else data.frame()
-table4_overall <- table4_all[table4_all$Stratum == "", , drop = FALSE]
-table4_dent <- table4_all[table4_all$Stratum != "", , drop = FALSE]
-write.csv(table4_overall, file.path(OUTPUT_DIR, paste0("table4_logistic_regression_", timestamp, ".csv")), row.names = FALSE)
-if (nrow(table4_dent) > 0) write.csv(table4_dent, file.path(OUTPUT_DIR, paste0("table4_logistic_regression_by_dentition_", timestamp, ".csv")), row.names = FALSE)
+  for (comparison_category in comparison_categories) {
 
-# Forest plot for overall Table 4.
-if (nrow(table4_overall) > 0) {
-  forest_df <- table4_overall[table4_overall$`Odds Ratio` != "N/A" & table4_overall$`95% CI` != "N/A", , drop = FALSE]
-  if (nrow(forest_df) > 0) {
-    forest_df$OR <- suppressWarnings(as.numeric(forest_df$`Odds Ratio`))
-    forest_df$CI_lower <- suppressWarnings(as.numeric(gsub("^\\(([^-]+)-.*$", "\\1", forest_df$`95% CI`)))
-    forest_df$CI_upper <- suppressWarnings(as.numeric(gsub("^\\([^-]+-([^)]+)\\)$", "\\1", forest_df$`95% CI`)))
-    forest_df$Plot_Label <- paste(forest_df$Outcome, forest_df$Comparison, sep = " | ")
-    forest_df <- forest_df[!is.na(forest_df$OR) & !is.na(forest_df$CI_lower) & !is.na(forest_df$CI_upper), , drop = FALSE]
-    if (nrow(forest_df) > 0) {
-      p_forest <- ggplot(forest_df, aes(x = OR, y = reorder(Plot_Label, OR))) +
-        geom_vline(xintercept = 1, linetype = "dashed") +
-        geom_segment(aes(x = CI_lower, xend = CI_upper, y = reorder(Plot_Label, OR), yend = reorder(Plot_Label, OR))) +
-        geom_point(size = 2) +
-        labs(x = "Odds Ratio (95% CI)", y = NULL) +
-        theme_minimal()
-      ggsave(file.path(OUTPUT_DIR, paste0("figure_forest_plot_", timestamp, ".png")), p_forest, width = 10, height = 8, dpi = 300)
-    }
-  }
-}
+    # Retain only Physical Abuse and the comparison category
+    df_model <- df[
+      df$abuse %in% c(reference_category, comparison_category),
+      c(
+        "abuse",
+        outcome_var,
+        "age_year",
+        "sex_male"
+      ),
+      drop = FALSE
+    ]
 
-# -----------------------------
-# Forest plot for overall Table 4: Japanese version
-# -----------------------------
+    # Complete-case analysis for variables included in this model
+    df_model <- df_model[
+      complete.cases(
+        df_model[, c(
+          "abuse",
+          outcome_var,
+          "age_year",
+          "sex_male"
+        )]
+      ),
+      ,
+      drop = FALSE
+    ]
 
-# -----------------------------
-# 1. Forest plot用データ整形
-# -----------------------------
-forest_df <- table4_overall %>%
-  filter(`Odds Ratio` != "N/A", `95% CI` != "N/A") %>%
-  mutate(
-    OR = suppressWarnings(as.numeric(`Odds Ratio`)),
-    CI_lower = suppressWarnings(as.numeric(sub("^\\(([^-]+)-.*$", "\\1", `95% CI`))),
-    CI_upper = suppressWarnings(as.numeric(sub("^\\([^-]+-([^)]+)\\)$", "\\1", `95% CI`))),
-    p_num = ifelse(
-      grepl("^<", `p-value`),
-      as.numeric(sub("^<", "", `p-value`)),
-      suppressWarnings(as.numeric(`p-value`))
+    # Physical Abuse = 0
+    # Comparison category = 1
+    df_model$comparison <- as.integer(
+      df_model$abuse == comparison_category
     )
-  ) %>%
-  filter(!is.na(OR), !is.na(CI_lower), !is.na(CI_upper))
 
-# -----------------------------
-# 2. 日本語ラベル
-# -----------------------------
-outcome_jp_map <- c(
-  "Caries Experience (>0)" = "う蝕経験あり",
-  "Untreated Caries"       = "未処置う蝕あり",
-  "Gingivitis"             = "歯肉炎あり",
-  "Treatment Need"         = "要治療"
-)
+    model_n <- nrow(df_model)
 
-comparison_short_map <- c(
-  "Neglect vs Physical Abuse"         = "Neglect",
-  "Emotional Abuse vs Physical Abuse" = "Emotional Abuse",
-  "Sexual Abuse vs Physical Abuse"    = "Sexual Abuse"
-)
+    # Group-specific denominators and events among the complete cases
+    # actually included in this pairwise model.
+    reference_n <- sum(
+      df_model$abuse == reference_category,
+      na.rm = TRUE
+    )
 
-comparison_jp_map <- c(
-  "Neglect"         = "ネグレクト",
-  "Emotional Abuse" = "心理的虐待",
-  "Sexual Abuse"    = "性的虐待"
-)
+    comparison_n <- sum(
+      df_model$abuse == comparison_category,
+      na.rm = TRUE
+    )
 
-n_map <- c(
-  "Neglect" = 328,
-  "Emotional Abuse" = 201,
-  "Sexual Abuse" = 60
-)
+    reference_events <- sum(
+      df_model$abuse == reference_category &
+        df_model[[outcome_var]] == 1L,
+      na.rm = TRUE
+    )
 
-forest_df <- forest_df %>%
-  mutate(
-    Outcome_jp = outcome_jp_map[Outcome],
-    Comp_short = comparison_short_map[Comparison],
-    Comp_jp = comparison_jp_map[Comp_short],
-    n_group = n_map[Comp_short],
-    y_label = paste0(Comp_jp, "\n(n=", n_group, ")"),
-    OR_CI_text = sprintf("%.2f (%.2f-%.2f)", OR, CI_lower, CI_upper),
-    sig_shape = ifelse(!is.na(p_num) & p_num < 0.05, "sig", "ns")
+    comparison_events <- sum(
+      df_model$abuse == comparison_category &
+        df_model[[outcome_var]] == 1L,
+      na.rm = TRUE
+    )
+
+    beta <- NA_real_
+    standard_error <- NA_real_
+    p_value <- NA_real_
+
+    adjusted_or <- NA_real_
+    ci_lower <- NA_real_
+    ci_upper <- NA_real_
+
+    model_status <- "Not fitted"
+
+    # Verify that both maltreatment categories are represented
+    if (model_n == 0) {
+
+      model_status <- "No complete cases"
+
+    } else if (length(unique(df_model$comparison)) < 2) {
+
+      model_status <- "Only one maltreatment category present"
+
+    } else if (length(unique(df_model[[outcome_var]])) < 2) {
+
+      model_status <- "Outcome has no variation"
+
+    } else {
+
+      # splines::ns() fits a natural cubic spline, i.e.,
+      # a restricted cubic spline with linear tails.
+      #
+      # Only age and sex are included as adjustment variables.
+      model_formula <- stats::as.formula(
+        paste0(
+          outcome_var,
+          " ~ comparison",
+          " + splines::ns(age_year, df = 4)",
+          " + sex_male"
+        )
+      )
+
+      fit_result <- tryCatch(
+        {
+          list(
+            fit = stats::glm(
+              formula = model_formula,
+              data = df_model,
+              family = stats::binomial(link = "logit"),
+              control = stats::glm.control(maxit = 100)
+            ),
+            error = NULL
+          )
+        },
+        error = function(e) {
+          list(
+            fit = NULL,
+            error = conditionMessage(e)
+          )
+        }
+      )
+
+      fit <- fit_result$fit
+
+      if (is.null(fit)) {
+
+        model_status <- paste0(
+          "Model error: ",
+          fit_result$error
+        )
+
+      } else if (!isTRUE(fit$converged)) {
+
+        model_status <- "Model did not converge"
+
+      } else {
+
+        coefficient_table <- summary(fit)$coefficients
+
+        if (!"comparison" %in% rownames(coefficient_table)) {
+
+          model_status <- "Comparison coefficient unavailable"
+
+        } else {
+
+          beta <- coefficient_table[
+            "comparison",
+            "Estimate"
+          ]
+
+          standard_error <- coefficient_table[
+            "comparison",
+            "Std. Error"
+          ]
+
+          p_value <- coefficient_table[
+            "comparison",
+            "Pr(>|z|)"
+          ]
+
+          if (
+            is.finite(beta) &&
+            is.finite(standard_error)
+          ) {
+
+            critical_value <- stats::qnorm(0.975)
+
+            adjusted_or <- exp(beta)
+
+            ci_lower <- exp(
+              beta - critical_value * standard_error
+            )
+
+            ci_upper <- exp(
+              beta + critical_value * standard_error
+            )
+          }
+
+          if (isTRUE(fit$boundary)) {
+            model_status <- paste0(
+              "Converged; boundary fit/",
+              "possible separation"
+            )
+          } else {
+            model_status <- "Converged"
+          }
+        }
+      }
+    }
+
+    table4_rows[[length(table4_rows) + 1L]] <- data.frame(
+      Outcome = outcome_label,
+      Comparison = paste0(
+        comparison_category,
+        " vs ",
+        reference_category
+      ),
+      Reference_group = reference_category,
+      Comparison_group = comparison_category,
+      Reference_N = reference_n,
+      Reference_Events = reference_events,
+      Comparison_N = comparison_n,
+      Comparison_Events = comparison_events,
+      Analysis_N = model_n,
+      OR_numeric = adjusted_or,
+      CI_lower_numeric = ci_lower,
+      CI_upper_numeric = ci_upper,
+      p_numeric = p_value,
+      Model = "Pairwise logistic regression (glm)",
+      Adjusted_for = paste0(
+        "Age (restricted cubic spline, df = 4), ",
+        "Sex"
+      ),
+      Model_status = model_status,
+      stringsAsFactors = FALSE
+    )
+  }
+}
+
+
+# ------------------------------------------------------------
+# 6. Combine and format Table 4
+# ------------------------------------------------------------
+
+if (length(table4_rows) == 0) {
+  stop("No pairwise logistic regression results were produced.")
+}
+
+table4_numeric <- dplyr::bind_rows(table4_rows)
+
+
+format_estimate <- function(x) {
+  output <- rep("N/A", length(x))
+  valid <- is.finite(x)
+  output[valid] <- sprintf("%.2f", x[valid])
+  output
+}
+
+format_confidence_interval <- function(lower, upper) {
+  output <- rep("N/A", length(lower))
+
+  valid <- (
+    is.finite(lower) &
+    is.finite(upper)
   )
 
-# -----------------------------
-# 3. 並び順
-# -----------------------------
-outcome_order <- c(
-  "う蝕経験あり",
-  "未処置う蝕あり",
-  "歯肉炎あり",
-  "要治療"
+  output[valid] <- sprintf(
+    "(%.2f-%.2f)",
+    lower[valid],
+    upper[valid]
+  )
+
+  output
+}
+
+format_p_value <- function(x) {
+  output <- rep("N/A", length(x))
+
+  valid <- is.finite(x)
+
+  output[valid & x < 0.0001] <- "<0.0001"
+
+  regular <- valid & x >= 0.0001
+
+  output[regular] <- sprintf(
+    "%.4f",
+    x[regular]
+  )
+
+  output
+}
+
+
+format_events_n_percent <- function(events, n) {
+  output <- rep("N/A", length(n))
+
+  valid <- (
+    !is.na(events) &
+    !is.na(n) &
+    n > 0
+  )
+
+  output[valid] <- sprintf(
+    "%d/%d (%.1f%%)",
+    as.integer(events[valid]),
+    as.integer(n[valid]),
+    100 * events[valid] / n[valid]
+  )
+
+  output
+}
+
+
+table4_output <- data.frame(
+  Outcome = table4_numeric$Outcome,
+  `Reference group` = table4_numeric$Reference_group,
+  `Reference events/N (%)` = format_events_n_percent(
+    table4_numeric$Reference_Events,
+    table4_numeric$Reference_N
+  ),
+  `Comparison group` = table4_numeric$Comparison_group,
+  `Comparison events/N (%)` = format_events_n_percent(
+    table4_numeric$Comparison_Events,
+    table4_numeric$Comparison_N
+  ),
+  `Pairwise model N` = table4_numeric$Analysis_N,
+  `Adjusted Odds Ratio` = format_estimate(
+    table4_numeric$OR_numeric
+  ),
+  `95% CI` = format_confidence_interval(
+    table4_numeric$CI_lower_numeric,
+    table4_numeric$CI_upper_numeric
+  ),
+  `p-value` = format_p_value(
+    table4_numeric$p_numeric
+  ),
+  Model = table4_numeric$Model,
+  Adjusted_for = table4_numeric$Adjusted_for,
+  Model_status = table4_numeric$Model_status,
+  check.names = FALSE,
+  stringsAsFactors = FALSE
 )
 
-comp_order <- c("ネグレクト", "心理的虐待", "性的虐待")
 
-forest_df <- forest_df %>%
-  mutate(
-    Outcome_jp = factor(Outcome_jp, levels = outcome_order),
-    Comp_jp = factor(Comp_jp, levels = comp_order)
-  ) %>%
-  arrange(Outcome_jp, Comp_jp)
+table4_file <- file.path(
+  OUTPUT_DIR,
+  paste0(
+    "table4_pairwise_logistic_regression_group_counts_",
+    timestamp,
+    ".csv"
+  )
+)
 
-# -----------------------------
-# 4. y座標
-# -----------------------------
-y_positions <- c(15, 14, 13, 11, 10, 9, 7, 6, 5, 3, 2, 1)
-forest_df$y <- y_positions[1:nrow(forest_df)]
+utils::write.csv(
+  table4_output,
+  table4_file,
+  row.names = FALSE,
+  fileEncoding = "UTF-8"
+)
 
-# 各Outcome見出しを、そのOutcome内の一番上の行（Neglect）と同じ高さに配置
-group_label_positions <- forest_df %>%
-  filter(Comp_jp == "ネグレクト") %>%
-  transmute(Outcome_jp, y_label_position = y)
+message(
+  format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+  " - INFO - Table 4 saved to: ",
+  table4_file
+)
 
-# -----------------------------
-# 5. 色と形
-# -----------------------------
-comp_color_map <- c(
-  "ネグレクト" = "#E69F00",
-  "心理的虐待" = "#56B4E9",
-  "性的虐待" = "#009E73"
+
+# =============================================================================
+# 7. Figure 4: common data preparation
+# =============================================================================
+
+# Use the unrounded numeric estimates stored in table4_numeric.
+# This avoids reconstructing ORs and confidence limits from formatted strings.
+if (nrow(table4_numeric) == 0) {
+  stop("Figure 4 could not be generated because table4_numeric is empty.")
+}
+
+forest_base <- table4_numeric |>
+  dplyr::filter(
+    is.finite(OR_numeric),
+    is.finite(CI_lower_numeric),
+    is.finite(CI_upper_numeric),
+    OR_numeric > 0,
+    CI_lower_numeric > 0,
+    CI_upper_numeric > 0
+  ) |>
+  dplyr::mutate(
+    OR = OR_numeric,
+    CI_lower = CI_lower_numeric,
+    CI_upper = CI_upper_numeric,
+    p_num = p_numeric
+  )
+
+if (nrow(forest_base) == 0) {
+  stop("Figure 4 could not be generated because no finite estimates were available.")
+}
+
+comparison_short_map <- c(
+  "Neglect vs Physical Abuse" = "Neglect",
+  "Emotional Abuse vs Physical Abuse" = "Emotional Abuse",
+  "Sexual Abuse vs Physical Abuse" = "Sexual Abuse"
+)
+
+# Standardize the outcome labels used in the manuscript figure.
+outcome_display_map_en <- c(
+  "Any caries experience (>0)" = "Caries Experience (>0)",
+  "Caries Experience (>0)" = "Caries Experience (>0)",
+  "Any untreated caries (>=1 decayed tooth)" = "Untreated Caries",
+  "Untreated Caries" = "Untreated Caries",
+  "Gingivitis" = "Gingivitis",
+  "Treatment need" = "Treatment Need",
+  "Treatment Need" = "Treatment Need"
+)
+
+# Use the actual group sizes in df rather than hard-coded sample sizes.
+n_map <- stats::setNames(
+  vapply(
+    comparison_categories,
+    function(g) {
+      as.integer(sum(as.character(df$abuse) == g, na.rm = TRUE))
+    },
+    integer(1)
+  ),
+  comparison_categories
+)
+
+forest_base <- forest_base |>
+  dplyr::mutate(
+    Comp_short = unname(comparison_short_map[Comparison]),
+    Outcome_display_en = unname(outcome_display_map_en[Outcome]),
+    n_group = unname(n_map[Comp_short]),
+    OR_CI_text = sprintf(
+      "%.2f (%.2f-%.2f)",
+      OR,
+      CI_lower,
+      CI_upper
+    ),
+    sig_shape = ifelse(
+      !is.na(p_num) & p_num < 0.05,
+      "sig",
+      "ns"
+    )
+  )
+
+if (anyNA(forest_base$Comp_short)) {
+  stop(
+    "Figure 4 contains an unrecognized comparison label: ",
+    paste(
+      unique(forest_base$Comparison[is.na(forest_base$Comp_short)]),
+      collapse = ", "
+    )
+  )
+}
+
+if (anyNA(forest_base$Outcome_display_en)) {
+  stop(
+    "Figure 4 contains an unrecognized outcome label: ",
+    paste(
+      unique(forest_base$Outcome[is.na(forest_base$Outcome_display_en)]),
+      collapse = ", "
+    )
+  )
+}
+
+if (anyNA(forest_base$n_group)) {
+  stop("Figure 4 could not determine one or more maltreatment-group sample sizes.")
+}
+
+# Fixed manuscript ordering.
+outcome_order_en <- c(
+  "Caries Experience (>0)",
+  "Untreated Caries",
+  "Gingivitis",
+  "Treatment Need"
+)
+
+comp_order_en <- c(
+  "Neglect",
+  "Emotional Abuse",
+  "Sexual Abuse"
+)
+
+# y positions create visible gaps between the four outcome blocks.
+y_positions <- c(
+  15, 14, 13,
+  11, 10, 9,
+  7, 6, 5,
+  3, 2, 1
 )
 
 shape_map <- c(
   "sig" = 15,
-  "ns"  = 16
+  "ns" = 16
 )
 
-# -----------------------------
-# 6. プロット
-# -----------------------------
-p_forest_jp <- ggplot(forest_df, aes(x = OR, y = y)) +
-  geom_vline(xintercept = 1, linetype = "dashed", color = "black", linewidth = 0.7) +
-  geom_errorbarh(
-    aes(xmin = CI_lower, xmax = CI_upper, color = Comp_jp),
+# Wong colorblind-friendly palette.
+comp_color_map_en <- c(
+  "Neglect" = "#E69F00",
+  "Emotional Abuse" = "#56B4E9",
+  "Sexual Abuse" = "#009E73"
+)
+
+expected_figure_rows <- length(outcome_order_en) * length(comp_order_en)
+
+if (nrow(forest_base) != expected_figure_rows) {
+  stop(
+    "Figure 4 requires exactly ",
+    expected_figure_rows,
+    " estimable outcome-comparison rows, but ",
+    nrow(forest_base),
+    " were available."
+  )
+}
+
+
+# =============================================================================
+# Figure 4A: English version
+# Outcome heading is placed on the Neglect row (top row of each outcome block)
+# =============================================================================
+
+forest_en <- forest_base |>
+  dplyr::mutate(
+    Outcome_en = factor(
+      Outcome_display_en,
+      levels = outcome_order_en
+    ),
+    Comp_short = factor(
+      Comp_short,
+      levels = comp_order_en
+    ),
+    y_label = paste0(
+      as.character(Comp_short),
+      "\n(n=",
+      n_group,
+      ")"
+    )
+  ) |>
+  dplyr::arrange(Outcome_en, Comp_short)
+
+if (anyNA(forest_en$Outcome_en) || anyNA(forest_en$Comp_short)) {
+  stop("Unexpected factor level detected in Figure 4 English data.")
+}
+
+if (anyDuplicated(forest_en[c("Outcome_en", "Comp_short")]) > 0) {
+  stop("Duplicate outcome-comparison rows were detected in Figure 4 English data.")
+}
+
+forest_en$y <- y_positions
+
+# Put each outcome heading at the same vertical position as Neglect.
+group_label_positions_en <- forest_en |>
+  dplyr::filter(Comp_short == "Neglect") |>
+  dplyr::transmute(
+    Outcome_en,
+    y_label_position = y
+  )
+
+p_forest_en <- ggplot2::ggplot(
+  forest_en,
+  ggplot2::aes(x = OR, y = y)
+) +
+  ggplot2::geom_vline(
+    xintercept = 1,
+    linetype = "dashed",
+    color = "black",
+    linewidth = 0.7
+  ) +
+  ggplot2::geom_errorbarh(
+    ggplot2::aes(
+      xmin = CI_lower,
+      xmax = CI_upper,
+      color = Comp_short
+    ),
     height = 0.10,
     linewidth = 1.0
   ) +
-  geom_point(
-    aes(color = Comp_jp, shape = sig_shape),
+  ggplot2::geom_point(
+    ggplot2::aes(
+      color = Comp_short,
+      shape = sig_shape
+    ),
     size = 3.5
   ) +
-  geom_text(
-    aes(x = 2.95, label = OR_CI_text),
+  ggplot2::geom_text(
+    ggplot2::aes(
+      x = 2.95,
+      label = OR_CI_text
+    ),
     hjust = 0,
-    size = 4.6,
+    size = 4.2,
     color = "black"
   ) +
-
-  # 左側のOutcome見出し：各OutcomeのNeglect行と同じ高さに表示
-  geom_text(
-    data = group_label_positions,
-    aes(x = -1.35, y = y_label_position, label = Outcome_jp),
+  ggplot2::geom_text(
+    data = group_label_positions_en,
+    ggplot2::aes(
+      x = -1.35,
+      y = y_label_position,
+      label = as.character(Outcome_en)
+    ),
     inherit.aes = FALSE,
     hjust = 1,
     vjust = 0.5,
     fontface = "bold",
-    size = 5.8
+    size = 5.0
   ) +
-  scale_color_manual(values = comp_color_map, guide = "none") +
-  scale_shape_manual(values = shape_map, guide = "none") +
-  scale_y_continuous(
-    breaks = forest_df$y,
-    labels = forest_df$y_label,
-    expand = expansion(mult = c(0.02, 0.02))
+  ggplot2::scale_color_manual(
+    values = comp_color_map_en,
+    guide = "none"
   ) +
-
-  # ★ limits を消す
-  scale_x_continuous(
+  ggplot2::scale_shape_manual(
+    values = shape_map,
+    guide = "none"
+  ) +
+  ggplot2::scale_y_continuous(
+    breaks = forest_en$y,
+    labels = forest_en$y_label,
+    expand = ggplot2::expansion(mult = c(0.02, 0.02))
+  ) +
+  ggplot2::scale_x_continuous(
     breaks = seq(0, 4.5, by = 0.5),
     expand = c(0, 0)
   ) +
-
-  # ★ xlim をここで指定
-  coord_cartesian(xlim = c(0, 4.5), clip = "off") +
-  labs(
-    x = "オッズ比（95%信頼区間）",
+  ggplot2::coord_cartesian(
+    xlim = c(0, 4.5),
+    clip = "off"
+  ) +
+  ggplot2::labs(
+    x = "Odds Ratio (95% CI)",
     y = NULL
   ) +
-  theme_minimal(base_family = "Hiragino Sans") +
-  theme(
-    panel.grid.major.y = element_blank(),
-    panel.grid.minor = element_blank(),
-    panel.grid.major.x = element_blank(),
-    panel.background = element_rect(fill = "transparent", color = NA),
-    plot.background = element_rect(fill = "transparent", color = NA),
-    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.8),
-    axis.text.y = element_text(size = 10.5, color = "black"),
-    axis.text.x = element_text(size = 11, color = "black"),
-    axis.title.x = element_text(size = 15, face = "bold", color = "black"),
-    plot.margin = margin(t = 20, r = 180, b = 20, l = 240)
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    panel.grid.major.y = ggplot2::element_blank(),
+    panel.grid.minor = ggplot2::element_blank(),
+    panel.grid.major.x = ggplot2::element_blank(),
+    panel.background = ggplot2::element_rect(
+      fill = "transparent",
+      color = NA
+    ),
+    plot.background = ggplot2::element_rect(
+      fill = "transparent",
+      color = NA
+    ),
+    panel.border = ggplot2::element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 0.8
+    ),
+    axis.text.y = ggplot2::element_text(
+      size = 10.5,
+      color = "black"
+    ),
+    axis.text.x = ggplot2::element_text(
+      size = 11,
+      color = "black"
+    ),
+    axis.title.x = ggplot2::element_text(
+      size = 15,
+      face = "bold",
+      color = "black"
+    ),
+    plot.margin = ggplot2::margin(
+      t = 20,
+      r = 180,
+      b = 20,
+      l = 280
+    )
   )
 
-p_forest_jp <- p_forest_jp +
-  theme(
-    panel.background = element_rect(fill = "transparent", color = NA),
-    plot.background  = element_rect(fill = "transparent", color = NA)
-  )
+# Main English manuscript figure.
+figure4_main_file <- file.path(
+  OUTPUT_DIR,
+  paste0("figure_forest_plot_", timestamp, ".png")
+)
 
-ggsave(
-  file.path(OUTPUT_DIR, paste0("figure_forest_plot_japanese_style_transparent_", timestamp, ".png")),
-  p_forest_jp,
+ggplot2::ggsave(
+  filename = figure4_main_file,
+  plot = p_forest_en,
   width = 11,
   height = 10,
   dpi = 300,
   bg = "transparent"
+)
+
+# Explicitly named English copy.
+figure4_english_file <- file.path(
+  OUTPUT_DIR,
+  paste0(
+    "figure_forest_plot_english_style_transparent_",
+    timestamp,
+    ".png"
+  )
+)
+
+ggplot2::ggsave(
+  filename = figure4_english_file,
+  plot = p_forest_en,
+  width = 11,
+  height = 10,
+  dpi = 300,
+  bg = "transparent"
+)
+
+message(
+  format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+  " - INFO - English Figure 4 saved to: ",
+  figure4_main_file
+)
+
+
+# =============================================================================
+# Figure 4B: Japanese version
+# =============================================================================
+
+outcome_label_map_ja <- c(
+  "Caries Experience (>0)" = "う蝕経験あり（>0）",
+  "Untreated Caries" = "未処置う蝕あり",
+  "Gingivitis" = "歯肉炎",
+  "Treatment Need" = "歯科治療の必要性"
+)
+
+comparison_label_map_ja <- c(
+  "Neglect" = "ネグレクト",
+  "Emotional Abuse" = "心理的虐待",
+  "Sexual Abuse" = "性的虐待"
+)
+
+forest_ja <- forest_en |>
+  dplyr::mutate(
+    Outcome_ja = factor(
+      unname(outcome_label_map_ja[as.character(Outcome_en)]),
+      levels = unname(outcome_label_map_ja[outcome_order_en])
+    ),
+    Comp_ja = factor(
+      unname(comparison_label_map_ja[as.character(Comp_short)]),
+      levels = unname(comparison_label_map_ja[comp_order_en])
+    ),
+    y_label_ja = paste0(
+      as.character(Comp_ja),
+      "\n(n=",
+      n_group,
+      ")"
+    )
+  )
+
+group_label_positions_ja <- forest_ja |>
+  dplyr::filter(Comp_short == "Neglect") |>
+  dplyr::transmute(
+    Outcome_ja,
+    y_label_position = y
+  )
+
+p_forest_ja <- ggplot2::ggplot(
+  forest_ja,
+  ggplot2::aes(x = OR, y = y)
+) +
+  ggplot2::geom_vline(
+    xintercept = 1,
+    linetype = "dashed",
+    color = "black",
+    linewidth = 0.7
+  ) +
+  ggplot2::geom_errorbarh(
+    ggplot2::aes(
+      xmin = CI_lower,
+      xmax = CI_upper,
+      color = Comp_short
+    ),
+    height = 0.10,
+    linewidth = 1.0
+  ) +
+  ggplot2::geom_point(
+    ggplot2::aes(
+      color = Comp_short,
+      shape = sig_shape
+    ),
+    size = 3.5
+  ) +
+  ggplot2::geom_text(
+    ggplot2::aes(
+      x = 2.95,
+      label = OR_CI_text
+    ),
+    hjust = 0,
+    size = 4.2,
+    color = "black"
+  ) +
+  ggplot2::geom_text(
+    data = group_label_positions_ja,
+    ggplot2::aes(
+      x = -1.35,
+      y = y_label_position,
+      label = as.character(Outcome_ja)
+    ),
+    inherit.aes = FALSE,
+    hjust = 1,
+    vjust = 0.5,
+    fontface = "bold",
+    size = 5.0
+  ) +
+  ggplot2::scale_color_manual(
+    values = comp_color_map_en,
+    guide = "none"
+  ) +
+  ggplot2::scale_shape_manual(
+    values = shape_map,
+    guide = "none"
+  ) +
+  ggplot2::scale_y_continuous(
+    breaks = forest_ja$y,
+    labels = forest_ja$y_label_ja,
+    expand = ggplot2::expansion(mult = c(0.02, 0.02))
+  ) +
+  ggplot2::scale_x_continuous(
+    breaks = seq(0, 4.5, by = 0.5),
+    expand = c(0, 0)
+  ) +
+  ggplot2::coord_cartesian(
+    xlim = c(0, 4.5),
+    clip = "off"
+  ) +
+  ggplot2::labs(
+    x = "調整オッズ比（95%信頼区間）",
+    y = NULL
+  ) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    panel.grid.major.y = ggplot2::element_blank(),
+    panel.grid.minor = ggplot2::element_blank(),
+    panel.grid.major.x = ggplot2::element_blank(),
+    panel.background = ggplot2::element_rect(
+      fill = "transparent",
+      color = NA
+    ),
+    plot.background = ggplot2::element_rect(
+      fill = "transparent",
+      color = NA
+    ),
+    panel.border = ggplot2::element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 0.8
+    ),
+    axis.text.y = ggplot2::element_text(
+      size = 10.5,
+      color = "black"
+    ),
+    axis.text.x = ggplot2::element_text(
+      size = 11,
+      color = "black"
+    ),
+    axis.title.x = ggplot2::element_text(
+      size = 15,
+      face = "bold",
+      color = "black"
+    ),
+    plot.margin = ggplot2::margin(
+      t = 20,
+      r = 180,
+      b = 20,
+      l = 280
+    )
+  )
+
+figure4_japanese_file <- file.path(
+  OUTPUT_DIR,
+  paste0(
+    "figure_forest_plot_japanese_style_transparent_",
+    timestamp,
+    ".png"
+  )
+)
+
+ggplot2::ggsave(
+  filename = figure4_japanese_file,
+  plot = p_forest_ja,
+  width = 11,
+  height = 10,
+  dpi = 300,
+  bg = "transparent"
+)
+
+message(
+  format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+  " - INFO - Japanese Figure 4 saved to: ",
+  figure4_japanese_file
 )
 
 # -----------------------------
