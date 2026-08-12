@@ -3273,3 +3273,751 @@ if ("abuse_num" %in% names(df_all)) {
 }
 
 message(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " - INFO - Analysis complete. Results saved to ", OUTPUT_DIR)
+
+
+# =============================================================================
+# Supplementary Table S6
+# Comparison of children with abuse_num == 1 versus abuse_num == 2
+#
+# Included group: abuse_num == 1
+# Excluded group: abuse_num == 2 exactly
+#
+# Recommended placement:
+# Replace the existing block beginning with
+#   "Compact profile of excluded multi-type cases"
+# after the main feature-engineering section.
+#
+# This code assumes that the following objects have already been created:
+#   df_all, OUTPUT_DIR, timestamp, SUBJECT_ID_COL_CANDIDATES,
+#   perm_teeth_cols, baby_teeth_cols
+# =============================================================================
+
+message(
+  format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+  " - INFO - Creating Supplementary Table S6: abuse_num 1 vs 2..."
+)
+
+# -----------------------------------------------------------------------------
+# 1. Select the two comparison groups from the same eligible source population
+# -----------------------------------------------------------------------------
+
+if (!exists("df_all")) {
+  stop("Object `df_all` was not found. Run the filtering section first.")
+}
+
+if (!("abuse_num" %in% names(df_all))) {
+  stop("Variable `abuse_num` was not found in df_all.")
+}
+
+if (!exists("perm_teeth_cols") || !exists("baby_teeth_cols")) {
+  stop("Objects `perm_teeth_cols` and/or `baby_teeth_cols` were not found.")
+}
+
+if (!exists("SUBJECT_ID_COL_CANDIDATES")) {
+  SUBJECT_ID_COL_CANDIDATES <- c(
+    "No_All", "child_id", "subject_id", "case_id", "ID", "id"
+  )
+}
+
+if (!exists("timestamp")) {
+  timestamp <- format(Sys.Date(), "%Y%m%d")
+}
+
+if (!exists("OUTPUT_DIR")) {
+  OUTPUT_DIR <- getwd()
+}
+
+dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+df_s6_source <- df_all
+
+df_s6_source$abuse_num_numeric <- suppressWarnings(
+  as.numeric(as.character(df_s6_source$abuse_num))
+)
+
+df_s6 <- df_s6_source[
+  !is.na(df_s6_source$abuse_num_numeric) &
+    df_s6_source$abuse_num_numeric %in% c(1, 2),
+  ,
+  drop = FALSE
+]
+
+if (nrow(df_s6) == 0) {
+  stop("No records with abuse_num == 1 or abuse_num == 2 were found.")
+}
+
+# -----------------------------------------------------------------------------
+# 2. Keep the first examination for each child, using the same principle as the
+#    primary analysis. Records with a missing subject ID are retained.
+# -----------------------------------------------------------------------------
+
+subject_id_col_s6 <- NULL
+for (candidate in SUBJECT_ID_COL_CANDIDATES) {
+  if (candidate %in% names(df_s6) && is.null(subject_id_col_s6)) {
+    subject_id_col_s6 <- candidate
+  }
+}
+
+df_s6$.s6_original_order <- seq_len(nrow(df_s6))
+
+if (!is.null(subject_id_col_s6)) {
+  if ("date" %in% names(df_s6)) {
+    df_s6 <- df_s6[
+      order(df_s6$date, df_s6$.s6_original_order, na.last = TRUE),
+      ,
+      drop = FALSE
+    ]
+  }
+
+  s6_id <- trimws(as.character(df_s6[[subject_id_col_s6]]))
+  s6_valid_id <- !is.na(s6_id) & nzchar(s6_id)
+  s6_duplicate_id <- s6_valid_id & duplicated(s6_id)
+  df_s6 <- df_s6[!s6_duplicate_id, , drop = FALSE]
+} else {
+  warning(
+    "No subject-ID column was found. Table S6 was generated without deduplication."
+  )
+}
+
+df_s6$.s6_original_order <- NULL
+
+# -----------------------------------------------------------------------------
+# 3. Derive oral-health variables identically for both groups
+# -----------------------------------------------------------------------------
+
+derive_s6_oral_health_variables <- function(dat) {
+
+  sum_two_components <- function(x, y) {
+    result <- ifelse(is.na(x), 0, x) + ifelse(is.na(y), 0, y)
+    result[is.na(x) & is.na(y)] <- NA_real_
+    result
+  }
+
+  recode_binary <- function(x, positive_values, negative_values, variable_name) {
+    x_chr <- trimws(as.character(x))
+    result <- rep(NA_integer_, length(x_chr))
+
+    result[!is.na(x_chr) & x_chr %in% positive_values] <- 1L
+    result[!is.na(x_chr) & x_chr %in% negative_values] <- 0L
+
+    unknown <- !is.na(x_chr) & nzchar(x_chr) & is.na(result)
+    if (any(unknown)) {
+      warning(
+        "Unrecognized non-missing values in `", variable_name, "`: ",
+        paste(sort(unique(x_chr[unknown])), collapse = ", "),
+        ". These values were treated as missing."
+      )
+    }
+
+    result
+  }
+
+  perm_cols_s6 <- perm_teeth_cols[perm_teeth_cols %in% names(dat)]
+  baby_cols_s6 <- baby_teeth_cols[baby_teeth_cols %in% names(dat)]
+
+  if (length(perm_cols_s6) == 0) {
+    stop("No permanent-tooth columns were found in the Table S6 dataset.")
+  }
+
+  if (length(baby_cols_s6) == 0) {
+    stop("No primary-tooth columns were found in the Table S6 dataset.")
+  }
+
+  for (tooth_col in c(perm_cols_s6, baby_cols_s6)) {
+    dat[[tooth_col]] <- suppressWarnings(as.numeric(dat[[tooth_col]]))
+  }
+
+  # Permanent teeth -----------------------------------------------------------
+  perm_mat_s6 <- dat[, perm_cols_s6, drop = FALSE]
+  perm_all_missing <- rowSums(!is.na(perm_mat_s6)) == 0
+
+  dat$Perm_D <- rowSums(perm_mat_s6 == 3, na.rm = TRUE)
+  dat$Perm_M <- rowSums(perm_mat_s6 == 4, na.rm = TRUE)
+  dat$Perm_F <- rowSums(perm_mat_s6 == 1, na.rm = TRUE)
+  dat$Perm_Sound <- rowSums(perm_mat_s6 == 0, na.rm = TRUE)
+  dat$Perm_total_teeth <- rowSums(
+    !is.na(perm_mat_s6) & perm_mat_s6 != -1,
+    na.rm = TRUE
+  )
+
+  for (v in c("Perm_D", "Perm_M", "Perm_F", "Perm_Sound")) {
+    dat[[v]][perm_all_missing] <- NA_real_
+  }
+  dat$Perm_total_teeth[perm_all_missing] <- NA_real_
+
+  dat$Perm_DMFT <- dat$Perm_D + dat$Perm_M + dat$Perm_F
+
+  # Permanent DMFT is defined only for children with at least one permanent
+  # tooth. A child with no permanent teeth is not treated as DMFT = 0.
+  dat$Perm_DMFT_analysis <- dat$Perm_DMFT
+  dat$Perm_DMFT_analysis[
+    is.na(dat$Perm_total_teeth) | dat$Perm_total_teeth <= 0
+  ] <- NA_real_
+
+  # Primary teeth -------------------------------------------------------------
+  baby_mat_s6 <- dat[, baby_cols_s6, drop = FALSE]
+  baby_all_missing <- rowSums(!is.na(baby_mat_s6)) == 0
+
+  dat$Baby_d <- rowSums(baby_mat_s6 == 3, na.rm = TRUE)
+  dat$Baby_m <- rowSums(baby_mat_s6 == 4, na.rm = TRUE)
+  dat$Baby_f <- rowSums(baby_mat_s6 == 1, na.rm = TRUE)
+  dat$Baby_sound <- rowSums(baby_mat_s6 == 0, na.rm = TRUE)
+  dat$Baby_total_teeth <- rowSums(
+    !is.na(baby_mat_s6) & baby_mat_s6 != -1,
+    na.rm = TRUE
+  )
+
+  for (v in c("Baby_d", "Baby_m", "Baby_f", "Baby_sound")) {
+    dat[[v]][baby_all_missing] <- NA_real_
+  }
+  dat$Baby_total_teeth[baby_all_missing] <- NA_real_
+
+  dat$Baby_DMFT <- dat$Baby_d + dat$Baby_m + dat$Baby_f
+
+  # Primary dmft is defined only for children with at least one primary tooth.
+  dat$Baby_DMFT_analysis <- dat$Baby_DMFT
+  dat$Baby_DMFT_analysis[
+    is.na(dat$Baby_total_teeth) | dat$Baby_total_teeth <= 0
+  ] <- NA_real_
+
+  # Total caries and tooth-status counts --------------------------------------
+  dat$DMFT_Index <- sum_two_components(
+    dat$Perm_DMFT_analysis,
+    dat$Baby_DMFT_analysis
+  )
+
+  dat$decayed_total <- sum_two_components(dat$Perm_D, dat$Baby_d)
+  dat$missing_total <- sum_two_components(dat$Perm_M, dat$Baby_m)
+  dat$filled_total <- sum_two_components(dat$Perm_F, dat$Baby_f)
+  dat$sound_total <- sum_two_components(dat$Perm_Sound, dat$Baby_sound)
+  dat$total_teeth <- sum_two_components(
+    dat$Perm_total_teeth,
+    dat$Baby_total_teeth
+  )
+
+  # Healthy teeth rate --------------------------------------------------------
+  dat$Healthy_Rate <- dat$sound_total / dat$total_teeth * 100
+  dat$Healthy_Rate[
+    !is.finite(dat$Healthy_Rate) |
+      is.na(dat$total_teeth) |
+      dat$total_teeth <= 0
+  ] <- NA_real_
+
+  # Care index and untreated-caries rate are defined only among children with
+  # caries experience (DMFT_Index > 0).
+  dat$Care_Index <- dat$filled_total / dat$DMFT_Index * 100
+  dat$Care_Index[
+    !is.finite(dat$Care_Index) |
+      is.na(dat$DMFT_Index) |
+      dat$DMFT_Index <= 0
+  ] <- NA_real_
+
+  dat$UTN_Score <- dat$decayed_total / dat$DMFT_Index * 100
+  dat$UTN_Score[
+    !is.finite(dat$UTN_Score) |
+      is.na(dat$DMFT_Index) |
+      dat$DMFT_Index <= 0
+  ] <- NA_real_
+
+  # Binary variables: preserve missingness rather than recoding missing values
+  # as absence of the outcome.
+  dat$has_caries_s6 <- ifelse(
+    is.na(dat$DMFT_Index),
+    NA_integer_,
+    as.integer(dat$DMFT_Index > 0)
+  )
+
+  dat$has_untreated_caries_s6 <- ifelse(
+    is.na(dat$decayed_total),
+    NA_integer_,
+    as.integer(dat$decayed_total > 0)
+  )
+
+  if (!("sex" %in% names(dat))) {
+    dat$female_binary_s6 <- NA_integer_
+    warning("Variable `sex` was not found; Female sex will be missing.")
+  } else {
+    dat$female_binary_s6 <- recode_binary(
+      dat$sex,
+      positive_values = c("Female", "female", "F", "女性", "女"),
+      negative_values = c("Male", "male", "M", "男性", "男"),
+      variable_name = "sex"
+    )
+  }
+
+  if (!("gingivitis" %in% names(dat))) {
+    dat$gingivitis_binary_s6 <- NA_integer_
+    warning("Variable `gingivitis` was not found.")
+  } else {
+    dat$gingivitis_binary_s6 <- recode_binary(
+      dat$gingivitis,
+      positive_values = c("Gingivitis", "2"),
+      negative_values = c("No Gingivitis", "1"),
+      variable_name = "gingivitis"
+    )
+  }
+
+  if (!("needTOBEtreated" %in% names(dat))) {
+    dat$treatment_required_s6 <- NA_integer_
+    warning("Variable `needTOBEtreated` was not found.")
+  } else {
+    dat$treatment_required_s6 <- recode_binary(
+      dat$needTOBEtreated,
+      positive_values = c("Treatment Required", "2"),
+      negative_values = c("No Treatment Required", "1"),
+      variable_name = "needTOBEtreated"
+    )
+  }
+
+  if (!("OralCleanStatus" %in% names(dat))) {
+    dat$fair_or_poor_hygiene_s6 <- NA_integer_
+    warning("Variable `OralCleanStatus` was not found.")
+  } else {
+    dat$fair_or_poor_hygiene_s6 <- recode_binary(
+      dat$OralCleanStatus,
+      positive_values = c("Poor", "Fair", "1", "2"),
+      negative_values = c("Good", "3"),
+      variable_name = "OralCleanStatus"
+    )
+  }
+
+  dat
+}
+
+df_s6 <- derive_s6_oral_health_variables(df_s6)
+
+df_s6$comparison_group <- factor(
+  df_s6$abuse_num_numeric,
+  levels = c(1, 2),
+  labels = c(
+    "Included (abuse_num = 1)",
+    "Excluded (abuse_num = 2)"
+  )
+)
+
+if (sum(df_s6$abuse_num_numeric == 1, na.rm = TRUE) == 0) {
+  stop("The included group (abuse_num == 1) has no observations.")
+}
+
+if (sum(df_s6$abuse_num_numeric == 2, na.rm = TRUE) == 0) {
+  stop("The excluded group (abuse_num == 2) has no observations.")
+}
+
+# Save the analysis dataset for audit/reproducibility.
+write.csv(
+  df_s6,
+  file.path(
+    OUTPUT_DIR,
+    paste0("tableS6_analysis_dataset_abuse_num1_vs_2_", timestamp, ".csv")
+  ),
+  row.names = FALSE,
+  na = "",
+  fileEncoding = "UTF-8"
+)
+
+# -----------------------------------------------------------------------------
+# 4. Variable specifications, in the requested order
+# -----------------------------------------------------------------------------
+
+s6_specs <- data.frame(
+  Variable = c(
+    "Age, years",
+    "Female sex",
+    "Total caries experience",
+    "Permanent DMFT",
+    "Primary dmft",
+    "Decayed teeth (D+d)",
+    "Missing teeth (M+m)",
+    "Filled teeth (F+f)",
+    "Healthy teeth rate (%)",
+    "Care index (% among children with caries)",
+    "Untreated caries rate (% among children with caries)",
+    "Caries experience (dmft/DMFT > 0)",
+    "Untreated caries present",
+    "Gingivitis present",
+    "Treatment required",
+    "Fair or poor oral hygiene"
+  ),
+  Column = c(
+    "age_year",
+    "female_binary_s6",
+    "DMFT_Index",
+    "Perm_DMFT_analysis",
+    "Baby_DMFT_analysis",
+    "decayed_total",
+    "missing_total",
+    "filled_total",
+    "Healthy_Rate",
+    "Care_Index",
+    "UTN_Score",
+    "has_caries_s6",
+    "has_untreated_caries_s6",
+    "gingivitis_binary_s6",
+    "treatment_required_s6",
+    "fair_or_poor_hygiene_s6"
+  ),
+  Type = c(
+    "continuous",
+    "binary",
+    "continuous",
+    "continuous",
+    "continuous",
+    "continuous",
+    "continuous",
+    "continuous",
+    "continuous",
+    "continuous",
+    "continuous",
+    "binary",
+    "binary",
+    "binary",
+    "binary",
+    "binary"
+  ),
+  stringsAsFactors = FALSE
+)
+
+missing_s6_columns <- setdiff(s6_specs$Column, names(df_s6))
+if (length(missing_s6_columns) > 0) {
+  stop(
+    "The following Table S6 variables were not created: ",
+    paste(missing_s6_columns, collapse = ", ")
+  )
+}
+
+# -----------------------------------------------------------------------------
+# 5. Formatting and statistical-test helpers
+# -----------------------------------------------------------------------------
+
+format_s6_p <- function(p) {
+  if (length(p) == 0 || is.na(p) || !is.finite(p)) {
+    return("N/A")
+  }
+  if (p < 0.0001) {
+    return("<0.0001")
+  }
+  sprintf("%.4f", p)
+}
+
+summarize_s6_continuous <- function(x) {
+  x <- suppressWarnings(as.numeric(x))
+  x <- x[!is.na(x) & is.finite(x)]
+  n <- length(x)
+
+  if (n == 0) {
+    return(list(
+      n = 0L,
+      mean_sd = "N/A",
+      median_iqr = "N/A",
+      display = "N/A"
+    ))
+  }
+
+  x_sd <- if (n > 1) stats::sd(x) else NA_real_
+  x_q <- stats::quantile(x, probs = c(0.25, 0.75), na.rm = TRUE)
+
+  mean_sd <- if (is.na(x_sd)) {
+    sprintf("%.2f ± N/A", mean(x))
+  } else {
+    sprintf("%.2f ± %.2f", mean(x), x_sd)
+  }
+
+  median_iqr <- sprintf(
+    "%.2f [%.2f-%.2f]",
+    stats::median(x),
+    x_q[1],
+    x_q[2]
+  )
+
+  list(
+    n = as.integer(n),
+    mean_sd = mean_sd,
+    median_iqr = median_iqr,
+    display = paste0(mean_sd, "; ", median_iqr)
+  )
+}
+
+summarize_s6_binary <- function(x) {
+  x <- suppressWarnings(as.numeric(x))
+  x <- x[!is.na(x)]
+  n <- length(x)
+
+  if (n == 0) {
+    return(list(
+      n = 0L,
+      events = NA_integer_,
+      percent = NA_real_,
+      display = "N/A"
+    ))
+  }
+
+  if (!all(x %in% c(0, 1))) {
+    stop("A binary Table S6 variable contains values other than 0, 1, or NA.")
+  }
+
+  events <- sum(x == 1)
+  percent <- 100 * events / n
+
+  list(
+    n = as.integer(n),
+    events = as.integer(events),
+    percent = percent,
+    display = sprintf("%d/%d (%.1f%%)", events, n, percent)
+  )
+}
+
+run_s6_continuous_test <- function(x, group) {
+  valid <- !is.na(x) & is.finite(suppressWarnings(as.numeric(x))) &
+    !is.na(group) & group %in% c(1, 2)
+
+  x_valid <- suppressWarnings(as.numeric(x[valid]))
+  group_valid <- group[valid]
+  x_included <- x_valid[group_valid == 1]
+  x_excluded <- x_valid[group_valid == 2]
+
+  if (length(x_included) == 0 || length(x_excluded) == 0) {
+    return(list(
+      test = "Wilcoxon rank-sum test (Mann-Whitney U; two-sided)",
+      statistic = "N/A",
+      p = NA_real_,
+      note = "Test unavailable because one group had no non-missing observations"
+    ))
+  }
+
+  test_result <- try(
+    suppressWarnings(
+      stats::wilcox.test(
+        x_included,
+        x_excluded,
+        alternative = "two.sided",
+        exact = FALSE,
+        correct = TRUE
+      )
+    ),
+    silent = TRUE
+  )
+
+  if (inherits(test_result, "try-error")) {
+    return(list(
+      test = "Wilcoxon rank-sum test (Mann-Whitney U; two-sided)",
+      statistic = "N/A",
+      p = NA_real_,
+      note = "Test failed"
+    ))
+  }
+
+  list(
+    test = "Wilcoxon rank-sum test (Mann-Whitney U; two-sided)",
+    statistic = sprintf("W = %.1f", as.numeric(test_result$statistic)),
+    p = as.numeric(test_result$p.value),
+    note = ""
+  )
+}
+
+run_s6_binary_test <- function(x, group) {
+  valid <- !is.na(x) & !is.na(group) & group %in% c(1, 2)
+  x_valid <- suppressWarnings(as.numeric(x[valid]))
+  group_valid <- group[valid]
+
+  if (!all(x_valid %in% c(0, 1))) {
+    return(list(
+      test = "N/A",
+      statistic = "N/A",
+      p = NA_real_,
+      note = "Binary variable contained values other than 0 or 1"
+    ))
+  }
+
+  n_included <- sum(group_valid == 1)
+  n_excluded <- sum(group_valid == 2)
+
+  if (n_included == 0 || n_excluded == 0) {
+    return(list(
+      test = "N/A",
+      statistic = "N/A",
+      p = NA_real_,
+      note = "Test unavailable because one group had no non-missing observations"
+    ))
+  }
+
+  if (length(unique(x_valid)) < 2) {
+    return(list(
+      test = "N/A",
+      statistic = "N/A",
+      p = NA_real_,
+      note = "Test unavailable because the outcome had no variation"
+    ))
+  }
+
+  contingency_table <- table(
+    factor(group_valid, levels = c(1, 2)),
+    factor(x_valid, levels = c(0, 1))
+  )
+
+  chi_check <- try(
+    suppressWarnings(stats::chisq.test(contingency_table, correct = FALSE)),
+    silent = TRUE
+  )
+
+  use_fisher <- inherits(chi_check, "try-error")
+  if (!use_fisher) {
+    use_fisher <- any(chi_check$expected < 5)
+  }
+
+  if (use_fisher) {
+    fisher_result <- try(stats::fisher.test(contingency_table), silent = TRUE)
+
+    if (inherits(fisher_result, "try-error")) {
+      return(list(
+        test = "Fisher's exact test (two-sided)",
+        statistic = "N/A",
+        p = NA_real_,
+        note = "Test failed"
+      ))
+    }
+
+    return(list(
+      test = "Fisher's exact test (two-sided)",
+      statistic = "Exact",
+      p = as.numeric(fisher_result$p.value),
+      note = "Used because at least one expected cell count was <5"
+    ))
+  }
+
+  list(
+    test = "Pearson chi-square test",
+    statistic = sprintf(
+      "Chi-square = %.3f",
+      as.numeric(chi_check$statistic)
+    ),
+    p = as.numeric(chi_check$p.value),
+    note = ""
+  )
+}
+
+# -----------------------------------------------------------------------------
+# 6. Generate Table S6
+# -----------------------------------------------------------------------------
+
+s6_rows <- list()
+
+for (i in seq_len(nrow(s6_specs))) {
+  variable_label <- s6_specs$Variable[i]
+  variable_column <- s6_specs$Column[i]
+  variable_type <- s6_specs$Type[i]
+
+  included_values <- df_s6[[variable_column]][
+    df_s6$abuse_num_numeric == 1
+  ]
+  excluded_values <- df_s6[[variable_column]][
+    df_s6$abuse_num_numeric == 2
+  ]
+
+  if (variable_type == "continuous") {
+    included_summary <- summarize_s6_continuous(included_values)
+    excluded_summary <- summarize_s6_continuous(excluded_values)
+    test_result <- run_s6_continuous_test(
+      df_s6[[variable_column]],
+      df_s6$abuse_num_numeric
+    )
+
+    summary_measure <- "Mean ± SD; Median [IQR]"
+
+  } else if (variable_type == "binary") {
+    included_summary <- summarize_s6_binary(included_values)
+    excluded_summary <- summarize_s6_binary(excluded_values)
+    test_result <- run_s6_binary_test(
+      df_s6[[variable_column]],
+      df_s6$abuse_num_numeric
+    )
+
+    summary_measure <- "Positive n/N (%)"
+
+  } else {
+    stop("Unknown Table S6 variable type: ", variable_type)
+  }
+
+  s6_rows[[length(s6_rows) + 1L]] <- data.frame(
+    Variable = variable_label,
+    `Summary measure` = summary_measure,
+    `Included non-missing N` = included_summary$n,
+    `Included: abuse_num = 1` = included_summary$display,
+    `Excluded non-missing N` = excluded_summary$n,
+    `Excluded: abuse_num = 2` = excluded_summary$display,
+    Test = test_result$test,
+    `Test statistic` = test_result$statistic,
+    p_numeric = test_result$p,
+    `p-value` = format_s6_p(test_result$p),
+    Note = test_result$note,
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+}
+
+tableS6_numeric <- dplyr::bind_rows(s6_rows)
+
+# Publication-ready version: omit the internal numeric p-value column.
+tableS6 <- tableS6_numeric[, setdiff(names(tableS6_numeric), "p_numeric"), drop = FALSE]
+
+# Group-level total N after eligibility filtering and deduplication.
+tableS6_group_counts <- data.frame(
+  Group = c(
+    "Included (abuse_num = 1)",
+    "Excluded (abuse_num = 2)"
+  ),
+  N = c(
+    sum(df_s6$abuse_num_numeric == 1, na.rm = TRUE),
+    sum(df_s6$abuse_num_numeric == 2, na.rm = TRUE)
+  ),
+  stringsAsFactors = FALSE
+)
+
+# -----------------------------------------------------------------------------
+# 7. Save outputs
+# -----------------------------------------------------------------------------
+
+tableS6_file <- file.path(
+  OUTPUT_DIR,
+  paste0("tableS6_abuse_num1_vs_2_", timestamp, ".csv")
+)
+
+tableS6_group_counts_file <- file.path(
+  OUTPUT_DIR,
+  paste0("tableS6_group_counts_abuse_num1_vs_2_", timestamp, ".csv")
+)
+
+tableS6_numeric_file <- file.path(
+  OUTPUT_DIR,
+  paste0("tableS6_numeric_audit_abuse_num1_vs_2_", timestamp, ".csv")
+)
+
+write.csv(
+  tableS6,
+  tableS6_file,
+  row.names = FALSE,
+  na = "",
+  fileEncoding = "UTF-8"
+)
+
+write.csv(
+  tableS6_group_counts,
+  tableS6_group_counts_file,
+  row.names = FALSE,
+  na = "",
+  fileEncoding = "UTF-8"
+)
+
+write.csv(
+  tableS6_numeric,
+  tableS6_numeric_file,
+  row.names = FALSE,
+  na = "",
+  fileEncoding = "UTF-8"
+)
+
+message("Table S6 saved to: ", tableS6_file)
+message("Table S6 group counts saved to: ", tableS6_group_counts_file)
+message("Table S6 numeric audit file saved to: ", tableS6_numeric_file)
+
+print(tableS6_group_counts)
+# print(tableS6)
