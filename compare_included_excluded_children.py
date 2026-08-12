@@ -13,7 +13,7 @@ from scipy import stats
 ROOT = Path(__file__).resolve().parents[1]
 INCLUDED_PATH = ROOT / "data" / "analysisData_20260211_tillMar2024_singleType_dedup_with_derived_variables.csv"
 EXCLUDED_PATH = ROOT / "data" / "analysisData_20260211_tillMar2024_abuseNum2_dedup_with_derived_variables.csv"
-OUT_DIR = ROOT / "result" / "included_vs_excluded_children_20260707"
+OUT_DIR = ROOT / "result" / "included_vs_excluded_children_20260813"
 
 
 CONTINUOUS_VARIABLES = [
