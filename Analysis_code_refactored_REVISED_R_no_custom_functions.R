@@ -314,22 +314,42 @@ for (tc in c(perm_cols, baby_cols)) {
 
 if (length(perm_cols) > 0) {
   perm_mat <- df[, perm_cols, drop = FALSE]
-  all_nan_mask_perm <- rowSums(!is.na(perm_mat)) == 0
+
+  # 永久歯として存在する歯の本数
+  # -1 = 未萌出/存在しない
+  df$Perm_total_teeth <- rowSums(
+    !is.na(perm_mat) & perm_mat != -1,
+    na.rm = TRUE
+  )
+
+  # 永久歯が1本も存在しない症例
+  no_perm_teeth <- df$Perm_total_teeth == 0
+
+  # 各状態の歯数
   df$Perm_D <- rowSums(perm_mat == 3, na.rm = TRUE)
   df$Perm_M <- rowSums(perm_mat == 4, na.rm = TRUE)
   df$Perm_F <- rowSums(perm_mat == 1, na.rm = TRUE)
   df$Perm_Sound <- rowSums(perm_mat == 0, na.rm = TRUE)
   df$Perm_C0 <- rowSums(perm_mat == 2, na.rm = TRUE)
-  df$Perm_total_teeth <- rowSums(!is.na(perm_mat) & perm_mat != -1, na.rm = TRUE)
-  df$Perm_D[all_nan_mask_perm] <- NA_real_
-  df$Perm_M[all_nan_mask_perm] <- NA_real_
-  df$Perm_F[all_nan_mask_perm] <- NA_real_
-  df$Perm_Sound[all_nan_mask_perm] <- NA_real_
-  df$Perm_C0[all_nan_mask_perm] <- NA_real_
+
+  # 永久歯が0本なら、永久歯に関する指標はNA
+  df$Perm_D[no_perm_teeth] <- NA_real_
+  df$Perm_M[no_perm_teeth] <- NA_real_
+  df$Perm_F[no_perm_teeth] <- NA_real_
+  df$Perm_Sound[no_perm_teeth] <- NA_real_
+  df$Perm_C0[no_perm_teeth] <- NA_real_
+
+  # Permanent DMFT
   df$Perm_DMFT <- df$Perm_D + df$Perm_M + df$Perm_F
   df$Perm_DMFT_C0 <- df$Perm_DMFT + df$Perm_C0
+
+  # Sound rate
   df$Perm_sound_rate <- df$Perm_Sound / df$Perm_total_teeth * 100
-  df$Perm_sound_rate[is.infinite(df$Perm_sound_rate)] <- NA_real_
+  df$Perm_sound_rate[
+    is.infinite(df$Perm_sound_rate) |
+    df$Perm_total_teeth <= 0
+  ] <- NA_real_
+
 } else {
   df$Perm_D <- NA_real_
   df$Perm_M <- NA_real_
@@ -4021,3 +4041,62 @@ message("Table S6 numeric audit file saved to: ", tableS6_numeric_file)
 
 print(tableS6_group_counts)
 # print(tableS6)
+
+cat(
+  "Perm_DMFT non-missing N:",
+  sum(!is.na(df$Perm_DMFT)),
+  "\n"
+)
+
+cat(
+  "Perm_DMFT non-missing & >=1 permanent tooth N:",
+  sum(
+    !is.na(df$Perm_DMFT) &
+    !is.na(df$Perm_total_teeth) &
+    df$Perm_total_teeth > 0
+  ),
+  "\n"
+)
+
+cat(
+  "Perm_DMFT non-missing but 0 permanent teeth N:",
+  sum(
+    !is.na(df$Perm_DMFT) &
+    !is.na(df$Perm_total_teeth) &
+    df$Perm_total_teeth == 0
+  ),
+  "\n"
+)
+
+
+df_perm0 <- df %>%
+  filter(
+    !is.na(Perm_DMFT),
+    !is.na(Perm_total_teeth),
+    Perm_total_teeth == 0
+  )
+
+# 件数
+nrow(df_perm0)
+
+# 確認したい変数
+df_perm0 %>%
+  select(
+    No_All,
+    age_year,
+    sex,
+    abuse,
+    Perm_DMFT,
+    Perm_total_teeth,
+    Baby_DMFT,
+    Baby_total_teeth,
+    DMFT_Index
+  )
+df_perm0 %>%
+  select(
+    No_All,
+    age_year,
+    Perm_DMFT,
+    Perm_total_teeth,
+    all_of(perm_cols)
+  )
